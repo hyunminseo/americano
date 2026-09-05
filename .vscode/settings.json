@@ -1,0 +1,12 @@
+{
+    "terminal.integrated.defaultProfile.windows": "Americano PowerShell",
+    "terminal.integrated.profiles.windows": {
+        "Americano PowerShell": {
+            "path": "${env:SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "args": ["-NoLogo", "-NoProfile"],
+            "icon": "terminal-powershell"
+        }
+    },
+    "terminal.integrated.automationProfile.windows": "Americano PowerShell",
+    "terminal.integrated.inheritEnv": true
+}

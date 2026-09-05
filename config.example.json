@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "monitor": 1,
+  "scan_interval_ms": 100,
+  "targets": [
+    {
+      "id": "confirm-button",
+      "image": "targets/confirm-button.png",
+      "region": {"x": 100, "y": 200, "width": 400, "height": 300},
+      "threshold": 0.9,
+      "trigger": "on_appear",
+      "cooldown_ms": 1000,
+      "actions": [{"key": "enter", "delay_ms": 0}],
+      "enabled": true
+    }
+  ]
+}
