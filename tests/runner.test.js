@@ -63,3 +63,24 @@ test('timed out native operation prevents following input and drains before unlo
   await runner.active.done;
   assert.equal(called, 1); assert.equal(runner.state().status, 'ERROR'); assert.match(runner.state().error, /timeout/);
 });
+
+test('supports image detection, retry, condition, and image click coordinates', async () => {
+  let scans = 0; const inputs = [];
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => { scans += 1; return scans >= 2 ? { x: 10, y: 20, width: 30, height: 40 } : null; }, input: {
+    execute: async (action) => { inputs.push(action); }, releaseAll: async () => {},
+  } });
+  const a = macro([{ type: 'retry', count: 2, interval_ms: 0, action: { type: 'image_detect', image: 'ok.png', region: { x: 0, y: 0, width: 100, height: 100 } } }, { type: 'image_click', image: 'ok.png', region: { x: 100, y: 200, width: 100, height: 100 } }]);
+  runner.start(a); await runner.active.done;
+  assert.equal(runner.state().outcome, 'completed');
+  assert.deepEqual(inputs[0], { type: 'click', button: 'left', x: 125, y: 240, timeout_ms: 10000 });
+});
+
+test('condition selects only the matching branch', async () => {
+  const inputs = [];
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => null, input: {
+    execute: async (action) => inputs.push(action.type), releaseAll: async () => {},
+  } });
+  runner.start(macro([{ type: 'condition', test: { type: 'image_detect', image: 'missing.png' }, then: [{ type: 'key', keys: 'enter' }], else: [{ type: 'text', text: 'fallback' }] }]));
+  await runner.active.done;
+  assert.equal(runner.state().outcome, 'completed'); assert.deepEqual(inputs, ['text']);
+});

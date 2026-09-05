@@ -1,5 +1,5 @@
-﻿const { contextBridge, ipcRenderer } = require('electron');
-const commands = new Set(['state', 'save', 'preview', 'start', 'pause', 'stop']);
+const { contextBridge, ipcRenderer } = require('electron');
+const commands = new Set(['state', 'save', 'preview', 'start', 'pause', 'stop', 'license-import', 'license-check', 'license-device', 'image-select']);
 contextBridge.exposeInMainWorld('americano', {
   request: (command, payload = {}) => {
     if (!commands.has(command)) return Promise.reject(new Error('허용되지 않은 명령입니다.'));

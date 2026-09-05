@@ -8,13 +8,15 @@ class RunControl {
   wake() { for (const resolve of [...this.listeners]) resolve(); }
   pause() { this.time(); this.paused = !this.paused; this.wake(); }
   stop() { this.abort.abort(); this.wake(); }
+  fail(error) { this.failure = error; this.stop(); }
   tick(ms = 25) { return new Promise((resolve) => {
     const done = () => { clearTimeout(timer); this.listeners.delete(done); resolve(); };
     const timer = setTimeout(done, ms); this.listeners.add(done);
   }); }
   async checkpoint() {
+    if (this.failure) throw this.failure;
     if (this.abort.signal.aborted) throw new Cancelled();
-    while (this.paused) { await this.tick(); if (this.abort.signal.aborted) throw new Cancelled(); }
+    while (this.paused) { await this.tick(); if (this.failure) throw this.failure; if (this.abort.signal.aborted) throw new Cancelled(); }
   }
   async wait(ms) {
     const end = this.time() + ms;
@@ -22,8 +24,8 @@ class RunControl {
   }
 }
 class MacroRunner {
-  constructor({ input, authorize = async () => { throw new Error('실제 실행은 창·권한·라이선스 연결 후 사용할 수 있습니다.'); }, onState = () => {} } = {}) {
-    this.input = input; this.authorize = authorize; this.onState = onState;
+  constructor({ input, imageMatcher, authorize = async () => { throw new Error('실제 실행은 창·권한·라이선스 연결 후 사용할 수 있습니다.'); }, onState = () => {} } = {}) {
+    this.input = input; this.imageMatcher = imageMatcher; this.authorize = authorize; this.onState = onState;
     this.current = { status: 'STOPPED', runId: null, macroId: null, step: null, preview: false, completed: 0, error: null, outcome: null };
     this.active = null;
   }
@@ -55,34 +57,80 @@ class MacroRunner {
   async execute(items, control, macro, preview, prefix, offset = 0) {
     for (let index = 0; index < items.length; index++) {
       await control.checkpoint();
+      if (!preview) { await this.authorize(macro); await control.checkpoint(); }
       const action = items[index]; const step = [...prefix, index + offset];
       this.publish({ step });
       if (action.type === 'stop') throw new Cancelled();
       if (action.type === 'wait') await control.wait(action.duration_ms);
+      else if (action.type === 'image_detect') {
+        if (!preview && !(await this.findImage(action, control))) throw new Error(`이미지를 찾지 못했습니다: ${action.image}`);
+        if (preview) await control.tick(0);
+      }
+      else if (action.type === 'image_wait') {
+        if (preview) await control.wait(Math.min(action.timeout_ms, 500));
+        else if (!(await this.waitForImage(action, control))) throw new Error(`이미지를 찾지 못했습니다: ${action.image}`);
+      }
+      else if (action.type === 'image_click') {
+        if (preview) await control.tick(0);
+        else {
+          const match = await this.waitForImage({ ...action, timeout_ms: Math.min(action.timeout_ms, 1000) }, control);
+          if (!match) throw new Error(`클릭할 이미지를 찾지 못했습니다: ${action.image}`);
+          await this.executeInput({ type: 'click', button: action.button ?? 'left', x: action.region.x + match.x + Math.floor(match.width / 2), y: action.region.y + match.y + Math.floor(match.height / 2), timeout_ms: action.timeout_ms }, control, macro);
+        }
+      }
+      else if (action.type === 'retry') {
+        let lastError;
+        for (let attempt = 0; attempt <= action.count; attempt += 1) {
+          try { await this.execute([action.action], control, macro, preview, step, 0); lastError = null; break; }
+          catch (error) { lastError = error; if (control.abort.signal.aborted || attempt === action.count) throw error; await control.wait(action.interval_ms); }
+        }
+        if (lastError) throw lastError;
+      }
+      else if (action.type === 'condition') {
+        const matched = preview ? false : Boolean(await this.findImage(action.test, control));
+        await this.execute(matched ? action.then : action.else, control, macro, preview, step, 0);
+      }
       else if (action.type === 'repeat') {
         for (let count = 0; count < action.count; count++) {
           await control.checkpoint(); await this.execute(action.actions, control, macro, preview, step);
           await control.tick(0);
         }
       } else if (!preview) {
-        await this.authorize(macro); await control.checkpoint();
-        if (!this.input) throw new Error('창 입력 어댑터가 준비되지 않았습니다.');
-        // The adapter must honor signal/checkpoint before every OS input and drain before resolving.
-        const start = control.time();
-        let settled = false; let timedOut = false;
-        const operation = Promise.resolve().then(() => this.input.execute(action, macro.target_window, control)).finally(() => { settled = true; });
-        operation.catch(() => {});
-        while (!settled) {
-          if (control.time() - start >= action.timeout_ms) { timedOut = true; control.stop(); }
-          await control.tick();
-        }
-        await operation;
-        if (timedOut) throw new Error('단계 timeout을 초과했습니다.');
-        await control.checkpoint();
+        await this.executeInput(action, control, macro);
       } else { await control.tick(0); }
     }
   }
+  async findImage(action, control) {
+    if (!this.imageMatcher) throw new Error('이미지 캡처 어댑터가 준비되지 않았습니다.');
+    await control.checkpoint();
+    return await this.imageMatcher(action, control);
+  }
+  async waitForImage(action, control) {
+    const deadline = control.time() + action.timeout_ms;
+    do {
+      const match = await this.findImage(action, control);
+      if (match) return match;
+      const remaining = deadline - control.time();
+      if (remaining <= 0) return null;
+      await control.wait(Math.min(action.poll_interval_ms, remaining));
+    } while (true);
+  }
+  async executeInput(action, control, macro) {
+    await this.authorize(macro); await control.checkpoint();
+    if (!this.input) throw new Error('창 입력 어댑터가 준비되지 않았습니다.');
+    const start = control.time(); let settled = false; let timedOut = false;
+    const operation = Promise.resolve().then(() => this.input.execute(action, macro.target_window, control)).finally(() => { settled = true; });
+    operation.catch(() => {});
+    while (!settled) {
+      if (control.time() - start >= action.timeout_ms) { timedOut = true; control.stop(); }
+      await control.tick();
+    }
+    await operation;
+    if (timedOut) throw new Error('단계 timeout을 초과했습니다.');
+    await control.checkpoint();
+  }
   pause() { if (this.active && !this.active.control.abort.signal.aborted) { this.active.control.pause(); this.publish({ status: this.active.control.paused ? 'PAUSED' : 'RUNNING' }); } return this.state(); }
   async stop() { const active = this.active; if (active) { active.control.stop(); await active.done; } return this.state(); }
+  invalidate(message) { if (this.active && !this.current.preview) this.active.control.fail(new Error(message)); }
 }
 module.exports = { MacroRunner, RunControl };

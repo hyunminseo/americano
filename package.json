@@ -12,7 +12,9 @@
     "test": "node --test",
     "start": "electron .",
     "dev": "electron .",
-    "build": "electron-builder --win nsis"
+    "build": "electron-builder --win portable --x64",
+    "build:license-compare": "node scripts/build-license-comparison.cjs",
+    "license:init": "node scripts/license-issuer.cjs init"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -26,16 +28,27 @@
   "build": {
     "appId": "com.americano.automation",
     "productName": "Americano",
-    "asar": false,
+    "asar": true,
     "files": [
       "electron/**/*",
-      "src/**/*",
-      "policy/center_patterns/**/*",
-      "targets/**/*",
-      "config.example.json"
+      "src/macros.js",
+      "src/store.js",
+      "src/runner.js",
+      "src/license.js",
+      "src/capture.js",
+      "src/matcher.js",
+      "src/windows.js",
+      "src/input-adapter.js",
+      "src/uo-script/**/*"
     ],
+    "extraResources": [{ "from": "licensing/public-key.pem", "to": "licensing/public-key.pem" }],
     "win": {
-      "target": "nsis"
+      "icon": "electron/assets/coffee.ico",
+      "signExecutable": false,
+      "target": "portable"
+    },
+    "portable": {
+      "artifactName": "Americano-Portable.exe"
     }
   }
 }
