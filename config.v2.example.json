@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "macros": [
+    {
+      "id": "confirm-flow",
+      "name": "확인 흐름",
+      "description": "입력 없는 미리보기 예시",
+      "enabled": false,
+      "hotkey": "ctrl+alt+q",
+      "target_window": { "process_name": "example.exe", "title_contains": "Example" },
+      "actions": [
+        { "type": "wait", "duration_ms": 1000 },
+        { "type": "key", "keys": "enter" },
+        { "type": "repeat", "count": 2, "actions": [{ "type": "wait", "duration_ms": 500 }] }
+      ]
+    }
+  ],
+  "global": { "pause_hotkey": "f8", "stop_hotkey": "f9", "default_timeout_ms": 10000 }
+}

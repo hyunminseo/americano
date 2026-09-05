@@ -1,7 +1,7 @@
-venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
+node_modules/
+dist/
+config.json
+*.log
 .mypy_cache/
 *.log
 config.json

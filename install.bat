@@ -1,16 +1,22 @@
 @echo off
 setlocal
 
-if not exist venv (
-	py -3 -m venv venv
-	if errorlevel 1 exit /b 1
+where node >nul 2>&1
+if errorlevel 1 (
+	echo [ERROR] Node.js 24 is required to run the Electron application.
+	echo Install Node.js from https://nodejs.org/ and run install.bat again.
+	exit /b 1
 )
 
-call venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+node -e "const major = Number(process.versions.node.split('.')[0]); if (major !== 24) process.exit(1)"
+if errorlevel 1 (
+	echo [ERROR] Node.js 24 is required. Update Node.js and run install.bat again.
+	exit /b 1
+)
+
+npm.cmd install
+if errorlevel 1 exit /b 1
 
 echo.
-echo Installation complete.
-echo Validate with: venv\Scripts\python.exe main.py --config config.json validate
+echo Installation complete. Start with: npm start
 endlocal
