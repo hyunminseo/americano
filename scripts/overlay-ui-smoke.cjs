@@ -46,6 +46,30 @@ app.whenReady().then(async()=>{
   if (await order() !== 'ctrl+a,alt+enter') throw new Error('Workflow reorder did not restore the node');
   await main.webContents.executeJavaScript(`current().actions[0].then.pop(); changed(); render();`);
   await main.webContents.executeJavaScript('save()');
+  // 자유 연결: 그립을 끌어 루트 노드 순서를 바꾼 뒤 되돌린다.
+  await main.webContents.executeJavaScript(`current().actions.push({type:'wait',duration_ms:100,timeout_ms:10000}); changed(); render();`);
+  async function drag(from, to, key) {
+    await main.webContents.executeJavaScript(`(() => {
+      const grip = document.querySelector('[data-inspect="${key}"] [data-grip]');
+      const fire = (type, x, y) => grip.dispatchEvent(
+        new PointerEvent(type, { clientX: x, clientY: y, bubbles: true, pointerId: 7, isPrimary: true }));
+      fire('pointerdown', ${from.x}, ${from.y});
+      for (let n = 1; n <= 6; n++) fire('pointermove', ${from.x} + (${to.x} - ${from.x}) * n / 6, ${from.y} + (${to.y} - ${from.y}) * n / 6);
+      fire('pointerup', ${to.x}, ${to.y});
+    })()`);
+    await sleep(200);
+  }
+  const gripOf = (key) => main.webContents.executeJavaScript(`(() => { const r = document.querySelector('[data-inspect="${key}"] [data-grip]').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), h: Math.round(r.height) }; })()`);
+  const from = await gripOf('0');
+  const below = await main.webContents.executeJavaScript(`(() => { const r = document.querySelector('[data-inspect="1"]').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.bottom + 24) }; })()`);
+  await drag(from, below, '0');
+  if (await main.webContents.executeJavaScript(`current().actions.map(a=>a.type).join(',')`) !== 'wait,condition') throw new Error('Pointer drag did not reorder nodes');
+  const back = await gripOf('1');
+  const above = await main.webContents.executeJavaScript(`(() => { const r = document.querySelector('[data-inspect="0"]').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(Math.max(0, r.top - 24)) }; })()`);
+  await drag(back, above, '1');
+  if (await main.webContents.executeJavaScript(`current().actions.map(a=>a.type).join(',')`) !== 'condition,wait') throw new Error('Pointer drag did not restore nodes');
+  await main.webContents.executeJavaScript(`current().actions.pop(); changed(); render();`);
+  await main.webContents.executeJavaScript('save()');
   const macro = await main.webContents.executeJavaScript('structuredClone(current())');
   if(macro.actions[0].then[0].keys!=='ctrl+a'||macro.actions[0].type!=='condition'||macro.loop.count!==3||!macro.images[0].path.endsWith('.aimg'))throw new Error('Saved workflow incomplete');
   const {MacroStore}=require('../src/store'); const store = new MacroStore(path.join(app.getPath('userData'),'macros-v2'),require('electron').safeStorage);await store.open();

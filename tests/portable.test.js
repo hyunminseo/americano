@@ -95,6 +95,15 @@ test('smart click assets including expected image remap across export and import
   assert.deepEqual(await destination.readImage(step.image), image);
   assert.deepEqual(await destination.readImage(step.expect_image), image);
 });
+test('export names the step missing its reference image', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'americano-portable-empty-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const source = new MacroStore(path.join(dir, 'source'), protector); await source.open();
+  const macro = { ...newMacro(), actions: [
+    { type: 'condition', test: { type: 'image_detect', image: '', region: { x: 0, y: 0, width: 100, height: 100 } }, then: [], else: [{ type: 'image_wait', image: '', region: { x: 0, y: 0, width: 100, height: 100 } }] },
+  ] };
+  await assert.rejects(exportMacro(macro, source), /1\.검사\.1단계의 기준 이미지/);
+});
 test('legacy client coordinates remain unchanged in schema and execution', async () => {
   const raw = { ...newMacro(), actions: [{ type: 'click', x: 50, y: 60 }] };
   const macro = validateDocument({ version: 2, macros: [raw] }).macros[0];

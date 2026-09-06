@@ -6,6 +6,8 @@ const { validateDocument } = require('./macros');
 const MAX_PACKAGE_BYTES = 32 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const normalize = macro => validateDocument({ version: 2, macros: [macro] }).macros[0];
+const branchName = (part) => typeof part === 'number' ? part + 1 : ({ test: '검사', then: '참', else: '거짓', action: '재시도' }[part] || part);
+const stepLabel = (step) => step.map(branchName).join('.');
 function walk(items, visit) {
   for (const action of items) {
     visit(action);
@@ -34,8 +36,23 @@ async function readPackage(file) {
 }
 async function exportMacro(raw, store) {
   const macro = normalize(raw);
+  const refs = [];
+  const collect = (items, prefix = []) => {
+    (items || []).forEach((action, index) => {
+      const step = [...prefix, index];
+      for (const field of imageRefs(action)) refs.push({ file: action[field], step: step.join('.') });
+      if (action.type === 'repeat') collect(action.actions, step);
+      if (action.type === 'condition') { collect([action.test], [...step, 'test']); collect(action.then, [...step, 'then']); collect(action.else, [...step, 'else']); }
+      if (action.type === 'retry') collect([action.action], [...step, 'action']);
+    });
+  };
+  collect(macro.actions);
+  const badAsset = macro.images.find((asset) => !asset.path);
+  if (badAsset) throw new Error(`보관함 "${badAsset.name || '이름 없음'}"의 이미지 파일이 없습니다.`);
+  const culprit = refs.find((ref) => !ref.file);
+  if (culprit) throw new Error(`${stepLabel(culprit.step.split('.').map((part) => /^\d+$/.test(part) ? Number(part) : part))}단계의 기준 이미지를 먼저 선택하세요.`);
   const paths = new Set(macro.images.map(asset => asset.path));
-  walk(macro.actions, action => { for (const field of imageRefs(action)) paths.add(action[field]); });
+  for (const ref of refs) paths.add(ref.file);
   if (paths.size > 200) throw new Error('이미지는 최대 200개까지 내보낼 수 있습니다.');
   const assets = []; const references = new Map();
   let size = 0;

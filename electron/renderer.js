@@ -54,6 +54,16 @@ function moveStep(macro, key, dir) {
   [items[index], items[target]] = [items[target], items[index]];
   return true;
 }
+function moveStepTo(macro, key, destContainerKey, destIndex) {
+  if (String(key).split('.').some((part) => part === 'test' || part === 'action')) throw new Error('고정된 단계는 옮길 수 없습니다.');
+  if (destContainerKey === key || destContainerKey.startsWith(`${key}.`)) throw new Error('자기 안에 옮길 수 없습니다.');
+  const { items, index, action } = resolvePath(macro, key);
+  const dest = containerItems(macro, destContainerKey);
+  items.splice(index, 1);
+  const at = Math.max(0, Math.min(dest === items && destIndex > index ? destIndex - 1 : destIndex, dest.length));
+  dest.splice(at, 0, action);
+  return (destContainerKey ? `${destContainerKey}.` : '') + at;
+}
 function containerItems(macro, containerKey) {
   if (!containerKey) return macro.actions;
   const parts = containerKey.split('.');
@@ -115,12 +125,17 @@ function selectedAction(macro) {
   try { return resolvePath(macro, selPath).action; }
   catch { return null; }
 }
+// 조건 노드 선택 시 검사 이미지를 바로 고를 수 있게 한다.
+function testImagePicker(macro, action) {
+  const assets = macro.images || [];
+  return `<label class="image-field">검사 이미지<span class="input-with-button"><input data-test-image-path type="text" value="${escapeHtml(action.test.image || '')}" placeholder="캡처 자산을 선택하세요"><button type="button" data-op="select-test-image">파일</button></span><span class="asset-quick-pick">${assets.map((asset) => `<button type="button" data-test-asset-path="${escapeHtml(asset.path)}" title="${escapeHtml(asset.name)}">${escapeHtml(asset.name)}</button>`).join('') || '<small>탐지 이미지 보관함에서 기준 이미지를 먼저 만드세요.</small>'}</span><small>현재: ${escapeHtml(assetName(macro, action.test.image))}</small></label>`;
+}
 function renderInspector(macro) {
   const box = $('#inspector');
   const found = selectedAction(macro);
   if (!found) { box.innerHTML = '<p class="empty">노드를 클릭하면 여기서 편집합니다.</p>'; return; }
-  const parts = selPath.split('.');
-  box.innerHTML = `<h4>${escapeHtml(stepNumber(parts))} · ${escapeHtml(typeLabels[found.type] || found.type)}</h4><div class="form-grid">${fields(found)}</div>`;
+  const parts = selPath.split('.').map((part) => /^\d+$/.test(part) ? Number(part) : part);
+  box.innerHTML = `<h4>${escapeHtml(stepNumber(parts))} · ${escapeHtml(typeLabels[found.type] || found.type)}</h4>${found.type === 'condition' && found.test ? testImagePicker(macro, found) : ''}<div class="form-grid">${fields(found)}</div>`;
   box.querySelectorAll('[data-field]').forEach((input) => { input.oninput = () => {
     const field = input.dataset.field;
     const value = input.type === 'number' ? (input.value === '' ? NaN : Number(input.value)) : input.value;
@@ -130,13 +145,17 @@ function renderInspector(macro) {
     if (sub) sub.textContent = nodeSubtitle(macro, found);
   }; });
   box.querySelectorAll('[data-asset-path]').forEach((button) => { button.onclick = () => { found.image = button.dataset.assetPath; changed(); render(); }; });
+  box.querySelectorAll('[data-test-asset-path]').forEach((button) => { button.onclick = () => { if (found.type === 'condition' && found.test) { found.test.image = button.dataset.testAssetPath; changed(); render(); } }; });
+  const testPathInput = box.querySelectorAll('[data-test-image-path]')[0];
+  if (testPathInput) testPathInput.oninput = () => { if (found.type === 'condition' && found.test) { found.test.image = testPathInput.value; changed(); } };
   box.querySelectorAll('[data-op]').forEach((button) => { button.onclick = () => {
     if (button.dataset.op === 'select-image') void selectImage(found);
+    if (button.dataset.op === 'select-test-image' && found.type === 'condition' && found.test) void selectImage(found.test);
   }; });
 }
 function bindWorkflow(macro) {
   $('#flow').querySelectorAll('[data-inspect-btn]').forEach((button) => {
-    button.onclick = () => { selPath = button.closest('[data-inspect]').dataset.inspect; render(); };
+    button.onclick = () => { if (suppressClick) { suppressClick = false; return; } selPath = button.closest('[data-inspect]').dataset.inspect; render(); };
   });
   $('#flow').querySelectorAll('[data-op]').forEach((button) => {
     button.onclick = () => {
@@ -180,6 +199,97 @@ function bindWorkflow(macro) {
       changed(); render();
     };
   });
+  bindNodeDrag(macro);
+}
+let dragState = null;
+let suppressClick = false;
+function clearDropMarks() { document.querySelectorAll('.drop-before,.drop-after,.drop-append').forEach((el) => el.classList.remove('drop-before', 'drop-after', 'drop-append')); }
+function dropAllowed(macro, key, target) {
+  try {
+    const destContainer = target.dataset.container;
+    if (destContainerKeyInvalid(key, destContainer)) return false;
+    if (target.hasAttribute('data-index')) {
+      const { items, index } = resolvePath(macro, key);
+      const dest = containerItems(macro, destContainer);
+      if (dest !== items) return true;
+      const at = Number(target.dataset.index) + (target.classList.contains('drop-after') ? 1 : 0);
+      return !(at === index || at === index + 1);
+    }
+    return true;
+  } catch { return false; }
+}
+function destContainerKeyInvalid(key, destContainer) {
+  return destContainer === key || destContainer.startsWith(`${key}.`);
+}
+function bindNodeDrag(macro) {
+  $('#flow').querySelectorAll('[data-grip]').forEach((grip) => {
+    grip.onpointerdown = (event) => {
+      const host = grip.closest('[data-inspect]');
+      if (!host) return;
+      event.preventDefault();
+      try { grip.setPointerCapture(event.pointerId); } catch { /* 합성 입력에서는 무시 */ }
+      dragState = { key: host.dataset.inspect, x: event.clientX, y: event.clientY, active: false, ghost: null, target: null, after: false };
+    };
+    grip.onpointermove = (event) => {
+      if (!dragState || !current()) return;
+      if (!dragState.active && Math.hypot(event.clientX - dragState.x, event.clientY - dragState.y) < 6) return;
+      if (!dragState.active) {
+        dragState.active = true;
+        const host = grip.closest('.flow-node');
+        if (host) host.classList.add('dragging');
+        const ghost = host ? host.cloneNode(true) : document.createElement('div');
+        ghost.className = 'flow-ghost';
+        ghost.style.left = `${event.clientX + 12}px`;
+        ghost.style.top = `${event.clientY + 12}px`;
+        document.body.appendChild(ghost);
+        dragState.ghost = ghost;
+      } else {
+        dragState.ghost.style.left = `${event.clientX + 12}px`;
+        dragState.ghost.style.top = `${event.clientY + 12}px`;
+      }
+      clearDropMarks();
+      const under = document.elementFromPoint(event.clientX, event.clientY);
+      const target = under ? under.closest('[data-container]') : null;
+      dragState.target = null;
+      if (target && dropAllowed(current(), dragState.key, target)) {
+        if (target.hasAttribute('data-index')) {
+          const rect = target.getBoundingClientRect();
+          dragState.after = event.clientY > rect.top + rect.height / 2;
+          target.classList.toggle('drop-after', dragState.after);
+          target.classList.toggle('drop-before', !dragState.after);
+        } else {
+          target.classList.add('drop-append');
+        }
+        dragState.target = target;
+      }
+    };
+    const finish = (commit) => {
+      if (!dragState) return;
+      const moved = dragState.active;
+      const macroNow = current();
+      dragState.ghost?.remove();
+      document.querySelectorAll('.dragging').forEach((el) => el.classList.remove('dragging'));
+      clearDropMarks();
+      const target = dragState.target;
+      const key = dragState.key;
+      dragState = null;
+      if (!commit || !moved || !target || !macroNow) return;
+      try {
+        let newKey;
+        if (target.hasAttribute('data-index')) {
+          const after = target.classList.contains('drop-after');
+          const at = Number(target.dataset.index) + (after ? 1 : 0);
+          newKey = moveStepTo(macroNow, key, target.dataset.container, at);
+        } else {
+          newKey = moveStepTo(macroNow, key, target.dataset.container, containerItems(macroNow, target.dataset.container).length);
+        }
+        selPath = newKey; changed(); render();
+      } catch (error) { log(error.message); return; }
+      suppressClick = true;
+    };
+    grip.onpointerup = () => finish(true);
+    grip.onpointercancel = () => finish(false);
+  });
 }
 function defaults(type) {
   const image = { type, image: '', zone: 0, monitor: 1, threshold: 0.9, poll_interval_ms: 100, region: { x: 0, y: 0, width: 1920, height: 1080 } };
@@ -201,26 +311,28 @@ const typeLabels = { wait: '대기', image_detect: '이미지 확인', image_wai
 function typeOptions() { return Object.entries(typeLabels).map(([type, label]) => '<option value="' + type + '">' + label + '</option>').join(''); }
 function stepNumber(step) { return step.map((part) => typeof part === 'number' ? part + 1 : ({ test: '검사', then: '참', else: '거짓', action: '재시도' }[part] || part)).join('.'); }
 function addSlot(containerKey) {
-  return '<div class="flow-add"><select data-add-type="' + escapeHtml(containerKey) + '" aria-label="추가할 단계">' + typeOptions() + '</select><button data-add="' + escapeHtml(containerKey) + '">＋ 추가</button></div>';
+  return '<div class="flow-add" data-container="' + escapeHtml(containerKey) + '"><select data-add-type="' + escapeHtml(containerKey) + '" aria-label="추가할 단계">' + typeOptions() + '</select><button data-add="' + escapeHtml(containerKey) + '">＋ 추가</button></div>';
 }
-function nodeHtml(macro, action, step) {
+function nodeHtml(macro, action, step, drop) {
   const editKey = step.join('.');
   const isTest = step.includes('test');
-  const ops = isTest ? '' : '<div class="node-ops"><button data-op="up" title="위로">↑</button><button data-op="down" title="아래로">↓</button><button data-op="copy" title="복제">⧉</button><button data-op="remove" title="삭제">✕</button>' + (step.length === 1 ? '<button data-op="preview" title="여기부터 미리보기">▶</button>' : '') + '</div>';
+  const opsHtml = (isTest || step.includes('action')) ? '' : '<div class="node-ops"><button data-op="up" title="위로">↑</button><button data-op="down" title="아래로">↓</button><button data-op="copy" title="복제">⧉</button><button data-op="remove" title="삭제">✕</button>' + (step.length === 1 ? '<button data-op="preview" title="여기부터 미리보기">▶</button>' : '') + '</div>';
   let children = '';
   if (action.type === 'condition') {
     children = '<div class="flow-lanes">'
-      + '<div class="flow-lane"><p class="lane-title true">참 · 탐지 성공</p>' + action.then.map((child, i) => nodeHtml(macro, child, [...step, 'then', i])).join('<div class="flow-link"></div>') + addSlot([...step, 'then'].join('.')) + '</div>'
-      + '<div class="flow-lane"><p class="lane-title false">거짓 · 탐지 실패</p>' + action.else.map((child, i) => nodeHtml(macro, child, [...step, 'else', i])).join('<div class="flow-link"></div>') + addSlot([...step, 'else'].join('.')) + '</div>'
+      + '<div class="flow-lane"><p class="lane-title true">참 · 탐지 성공</p>' + action.then.map((child, i) => nodeHtml(macro, child, [...step, 'then', i], { container: [...step, 'then'].join('.'), index: i })).join('<div class="flow-link"></div>') + addSlot([...step, 'then'].join('.')) + '</div>'
+      + '<div class="flow-lane"><p class="lane-title false">거짓 · 탐지 실패</p>' + action.else.map((child, i) => nodeHtml(macro, child, [...step, 'else', i], { container: [...step, 'else'].join('.'), index: i })).join('<div class="flow-link"></div>') + addSlot([...step, 'else'].join('.')) + '</div>'
       + '</div>';
   } else if (action.type === 'repeat') {
-    children = '<div class="flow-lane"><p class="lane-title">반복 ×' + action.count + '</p>' + action.actions.map((child, i) => nodeHtml(macro, child, [...step, i])).join('<div class="flow-link"></div>') + addSlot(editKey) + '</div>';
+    children = '<div class="flow-lane"><p class="lane-title">반복 ×' + action.count + '</p>' + action.actions.map((child, i) => nodeHtml(macro, child, [...step, i], { container: editKey, index: i })).join('<div class="flow-link"></div>') + addSlot(editKey) + '</div>';
   } else if (action.type === 'retry') {
     const imageOptions = ['image_detect', 'image_wait', 'image_click', 'smart_click'].map((type) => `<option value="${type}">${typeLabels[type]}</option>`).join('');
-    children = '<div class="flow-lane"><p class="lane-title">재시도 대상</p>' + nodeHtml(macro, action.action, [...step, 'action', 0]) + '<div class="flow-add"><select data-replace="' + escapeHtml(editKey) + '" aria-label="교체할 이미지 동작">' + imageOptions + '</select><button data-replace-btn="' + escapeHtml(editKey) + '">교체</button></div></div>';
+    children = '<div class="flow-lane"><p class="lane-title">재시도 대상</p>' + nodeHtml(macro, action.action, [...step, 'action', 0], null) + '<div class="flow-add"><select data-replace="' + escapeHtml(editKey) + '" aria-label="교체할 이미지 동작">' + imageOptions + '</select><button data-replace-btn="' + escapeHtml(editKey) + '">교체</button></div></div>';
   }
-  return '<div class="flow-node' + (selPath === editKey ? ' selected' : '') + '" data-step="' + escapeHtml(runKey(step)) + '" data-inspect="' + escapeHtml(editKey) + '">'
-    + '<div class="node-line"><button class="node-main" data-inspect-btn title="선택해 편집"><span class="node-icon">' + (typeIcons[action.type] || '•') + '</span><span class="node-text"><strong>' + stepNumber(step) + '. ' + escapeHtml(typeLabels[action.type] || action.type) + '</strong><small class="node-sub">' + escapeHtml(nodeSubtitle(macro, action)) + '</small></span></button>' + ops + '</div>'
+  const dropAttrs = drop ? ` data-container="${escapeHtml(drop.container)}" data-index="${drop.index}"` : '';
+  const grip = drop ? '<span class="node-grip" data-grip title="끌어 순서 변경">⠿</span>' : '';
+  return '<div class="flow-node' + (selPath === editKey ? ' selected' : '') + '" data-step="' + escapeHtml(runKey(step)) + '" data-inspect="' + escapeHtml(editKey) + '"' + dropAttrs + '>'
+    + '<div class="node-line">' + grip + '<button class="node-main" data-inspect-btn title="선택해 편집"><span class="node-icon">' + (typeIcons[action.type] || '•') + '</span><span class="node-text"><strong>' + stepNumber(step) + '. ' + escapeHtml(typeLabels[action.type] || action.type) + '</strong><small class="node-sub">' + escapeHtml(nodeSubtitle(macro, action)) + '</small></span></button>' + opsHtml + '</div>'
     + children + '</div>';
 }
 // 실행 상태 키(run.step)와 맞추기 위해 retry 자식은 부모 키를 공유한다.
@@ -234,7 +346,7 @@ function runKey(step) {
 }
 function workflowHtml(macro) {
   if (!macro.actions.length) return '<p class="empty">아래 ＋ 추가로 첫 단계를 만드세요.</p>';
-  return macro.actions.map((action, index) => nodeHtml(macro, action, [index])).join('<div class="flow-link"></div>') + addSlot('');
+  return macro.actions.map((action, index) => nodeHtml(macro, action, [index], { container: '', index })).join('<div class="flow-link"></div>') + addSlot('');
 }
 async function selectImage(action) {
   try {

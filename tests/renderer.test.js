@@ -45,6 +45,26 @@ test('workflow renders nested branches and escapes node text', () => {
   assert.match(html, /&lt;script&gt;/);
   assert.doesNotMatch(html, /<script>|textarea|JSON/);
 });
+test('workflow moves nodes across containers and guards fixed paths', () => {
+  const { context } = renderer();
+  const moved = vm.runInContext(`JSON.stringify((() => {
+    const m = { actions: [{ type: 'key', keys: 'a' }, { type: 'repeat', count: 2, actions: [{ type: 'wait', duration_ms: 1 }] }] };
+    const key = moveStepTo(m, '0', '1', 1);
+    return { key, types: m.actions[0].actions.map((a) => a.type) };
+  })())`, context);
+  assert.deepEqual(JSON.parse(moved), { key: '1.1', types: ['wait', 'key'] });
+  assert.throws(() => vm.runInContext(`moveStepTo({ actions: [{ type: 'repeat', count: 1, actions: [] }] }, '0', '0', 0)`, context), /자기 안/);
+  assert.throws(() => vm.runInContext(`moveStepTo({ actions: [{ type: 'condition', test: { type: 'image_detect' }, then: [], else: [] }] }, '0.test.0', '', 0)`, context), /고정된 단계/);
+});
+test('inspector numbers match workflow nodes and condition shows test image picker', () => {
+  const { context, elements } = renderer();
+  vm.runInContext(`selectedId = 'm1'; documentData = { version: 2, macros: [{ id: 'm1', images: [{ id: 'a', name: '버튼', path: 'b.png' }], actions: [{ type: 'wait', duration_ms: 100 }, { type: 'condition', test: { type: 'image_detect', image: '' }, then: [], else: [] }] }] }; selPath = '1';`, context);
+  vm.runInContext(`renderInspector(documentData.macros[0])`, context);
+  const html = elements.get('#inspector').innerHTML;
+  assert.match(html, /2 · 조건 분기/);
+  assert.match(html, /검사 이미지/);
+  assert.match(html, /버튼/);
+});
 test('workflow moves nodes and resolves nested paths', () => {
   const { context } = renderer();
   const order = vm.runInContext(`JSON.stringify((() => { const m = { actions: [{type:'key',keys:'a'},{type:'key',keys:'b'}] }; moveStep(m, '1', -1); return m.actions.map(a=>a.keys); })())`, context);
