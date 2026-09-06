@@ -133,3 +133,8 @@ body { background: #ece8df; font-family: "Trebuchet MS", "Segoe UI", sans-serif;
 .capture-studio .asset-list { margin: 16px 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
 .capture-studio .asset-list:empty { display: none; }
 .capture-studio .asset-card img { width: 64px; height: 48px; object-fit: contain; background: #e9e3da; border-radius: 3px; }
+#block-workspace { height: 640px; min-width: 0; border: 1px solid #d6deea; border-radius: 12px; overflow: hidden; position: relative; }
+#block-workspace[hidden], #steps[hidden] { display: none; }
+.blocklyWidgetDiv input { min-width: 0; padding: 0; }
+.blocklyToolboxDiv { background: #f1f5fa; }
+.portable-panel { padding: 12px 16px; margin: 16px 0; background: #f1f5fa; border-radius: 10px; }

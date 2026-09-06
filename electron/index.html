@@ -1,8 +1,8 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Americano</title>
   <link rel="stylesheet" href="styles.css">
@@ -14,7 +14,7 @@
     <section class="overview-grid" aria-label="작업 공간 요약"><div class="metric"><span>등록된 매크로</span><strong id="macro-count">0</strong><small>로컬 암호화 저장소</small></div><div class="metric"><span>전체 단계</span><strong id="step-count">0</strong><small>반복 내부 단계 포함</small></div><div class="metric"><span>현재 라이선스</span><strong id="license-summary">확인 중</strong><small id="license-summary-detail">실행 권한 상태</small></div></section>
     <section class="toolbar"><span id="runtime-copy">실행 대기</span><div class="actions"><button class="button ghost" id="pause-button">F8 일시정지</button><button class="button danger" id="stop-button">F9 중지</button></div></section>
     <div class="workspace">
-      <aside><div class="section-heading"><h3>매크로</h3><button id="new-button" class="button ghost">새로 만들기</button></div><label class="search-box"><span>⌕</span><input id="macro-search" type="search" placeholder="매크로 검색" aria-label="매크로 검색"></label><div id="macros"></div></aside>
+      <aside><div class="section-heading"><h3>매크로</h3><button id="new-button" class="button ghost">새로 만들기</button></div><label class="search-box"><span>⌕</span><input id="macro-search" type="search" placeholder="매크로 검색" aria-label="매크로 검색"></label><button id="import-macro" class="button ghost">매크로 가져오기</button><div id="macros"></div></aside>
       <section id="editor"><p>매크로를 만들거나 선택하세요.</p></section>
     </div>
     <footer><span id="log-line" role="status" aria-live="polite">로컬 암호화 저장소 준비 중</span></footer>
@@ -26,6 +26,6 @@
       <p class="modal-note">라이선스 파일은 앱 내부의 암호화 저장소에 등록되며 외부로 전송되지 않습니다.</p>
     </section>
   </div>
-  <script src="renderer.js"></script>
+  <script src="../node_modules/blockly/blockly_compressed.js"></script><script src="../node_modules/blockly/msg/ko.js"></script><script src="blocks.js"></script><script src="renderer.js"></script>
 </body>
 </html>

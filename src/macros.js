@@ -104,7 +104,8 @@ function validateDocument(raw) {
     if (script) {
       try { parseScript(script); } catch (error) { fail(`script: ${error.message}`); }
     }
-    const images = Array.isArray(item.images) ? item.images.slice(0, 200).map((image) => {
+    if (Array.isArray(item.images) && item.images.length > 200) fail('이미지 자산은 최대 200개입니다.');
+    const images = Array.isArray(item.images) ? item.images.map((image) => {
       if (!image || typeof image !== 'object') fail('이미지 자산이 잘못되었습니다.');
       return { id: string(image.id, 'image.id', 64), name: string(image.name, 'image.name', 200).trim(), path: string(image.path, 'image.path', 4096), preview: string(image.preview ?? '', 'image.preview', 2000000), region: region(image.region, 'image.region') };
     }) : [];

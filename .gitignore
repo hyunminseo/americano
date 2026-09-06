@@ -1,4 +1,5 @@
 node_modules/
+artifacts/
 .local/
 dist/
 config.json

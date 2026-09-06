@@ -16,7 +16,10 @@
     "build": "npm run build:icon && electron-builder --win portable --x64",
     "build:license-compare": "npm run build:icon && node scripts/build-license-comparison.cjs",
     "license:init": "node scripts/license-issuer.cjs init",
-    "test:overlay-ui": "electron scripts/overlay-ui-smoke.cjs"
+    "test:overlay-ui": "electron scripts/overlay-ui-smoke.cjs",
+    "test:keyboard-ui": "electron scripts/keyboard-ui-smoke.cjs",
+    "test:image-scenario": "electron scripts/image-scenario-smoke.cjs",
+    "test:image-mabinogi": "electron scripts/image-scenario-mabinogi.cjs"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -24,6 +27,7 @@
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6",
+    "blockly": "^13.2.1",
     "koffi": "^3.2.1",
     "screenshot-desktop": "^1.15.0",
     "sharp": "^0.34.3"
@@ -36,6 +40,7 @@
       "electron/**/*",
       "src/macros.js",
       "src/portable.js",
+      "src/keyboard.js",
       "src/store.js",
       "src/runner.js",
       "src/license.js",

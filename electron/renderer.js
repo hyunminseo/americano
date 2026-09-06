@@ -8,6 +8,42 @@ let macroFilter = '';
 let allowUnload = false;
 let captureMacroId = null;
 let captureState = { activeAsset: null };
+let blockWorkspace = null;
+let blockPaths = new Map();
+let blockError = '';
+let editorMode = 'blocks';
+function syncBlocks() {
+  if (!blockWorkspace) return true;
+  try {
+    const result = window.MacroBlocks.compile(blockWorkspace);
+    current().actions = result.actions; blockPaths = result.paths; blockError = '';
+    return true;
+  } catch (error) { blockError = error.message; log(blockError); return false; }
+}
+function mountBlocks(macro) {
+  if (!window.Blockly || editorMode !== 'blocks') return;
+  const images = () => {
+    const assets = [...(macro.images || [])];
+    function visit(actions) { for (const action of actions) {
+      if (action.image && !assets.some(asset => asset.path === action.image)) assets.push({ path: action.image, name: '기존 이미지' });
+      if (action.actions) visit(action.actions);
+      if (action.test) { visit([action.test]); visit(action.then); visit(action.else); }
+      if (action.action) visit([action.action]);
+    } }
+    visit(macro.actions); return assets;
+  };
+  window.MacroBlocks.register(window.Blockly, images, () => macro.overlay);
+  blockWorkspace = window.Blockly.inject('block-workspace', { toolbox: window.MacroBlocks.toolbox(), renderer: 'zelos', media: '../node_modules/blockly/media/', trashcan: true, sounds: false, scrollbars: true, zoom: { controls: true, wheel: true, startScale: 0.8 }, move: { drag: true, wheel: true }, grid: { spacing: 24, length: 3, colour: '#d5dce8', snap: true } });
+  window.Blockly.Events.disable();
+  try { window.MacroBlocks.load(window.Blockly, blockWorkspace, macro.actions); }
+  finally { window.Blockly.Events.enable(); }
+  syncBlocks();
+  blockWorkspace.addChangeListener(event => {
+    if (event.isUiEvent || event.type === window.Blockly.Events.FINISHED_LOADING) return;
+    syncBlocks(); changed();
+    if (blockError) log(blockError);
+  });
+}
 const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 const current = () => documentData.macros.find((macro) => macro.id === selectedId);
 const log = (message) => { $('#log-line').textContent = message; };
@@ -42,6 +78,7 @@ function update(state) {
   if ($('#first-macro')) $('#first-macro').disabled = !state.storageReady || saving;
   if (run.error) log(run.error);
   document.querySelectorAll('[data-step]').forEach((row) => row.classList.toggle('executing', run.macroId === selectedId && run.step?.join('.') === row.dataset.step));
+  if (blockWorkspace) blockWorkspace.highlightBlock(run.macroId === selectedId && run.step ? blockPaths.get(run.step.join('.')) || null : null);
 }
 function renderList() {
   const visible = documentData.macros.filter((macro) => `${macro.name} ${macro.description || ''}`.toLowerCase().includes(macroFilter.toLowerCase()));
@@ -136,7 +173,7 @@ function bindCapture(macro) {
   $('#overlay-hide').onclick = () => request('overlay-hide');
   $('#capture-open').onclick = () => open('region');
   $('#capture-image').onclick = () => open('image');
-  document.querySelectorAll('[data-asset-id]').forEach(button => { button.onclick = () => { captureState.activeAsset = button.dataset.assetId; render(); }; });
+  document.querySelectorAll('[data-asset-id]').forEach(button => { button.onclick = () => { if (!validFields()) return; captureState.activeAsset = button.dataset.assetId; render(); }; });
   $('#add-rule').onclick = () => {
     if (!validFields()) return;
     const asset = (macro.images || []).find(item => item.id === captureState.activeAsset) || macro.images[0];
@@ -149,6 +186,8 @@ function bindCapture(macro) {
 }
 
 function render() {
+  if (blockWorkspace) { blockWorkspace.dispose(); blockWorkspace = null; }
+  blockError = '';
   renderList();
   $('#macro-count').textContent = documentData.macros.length;
   $('#step-count').textContent = documentData.macros.reduce((total, macro) => total + countSteps(macro.actions), 0);
@@ -163,15 +202,17 @@ function render() {
     <div class="target-picker"><div><p class="eyebrow">TARGET WINDOW</p><strong>실행 대상 창</strong><small id="target-status">창 목록을 불러오지 않았습니다.</small></div><div class="target-controls"><select id="target-window" aria-label="실행 대상 창"><option value="${escapeHtml(macro.target_window.title_contains || '')}">${escapeHtml(macro.target_window.title_contains || '창을 선택하세요')}</option></select><button id="refresh-windows" type="button" class="button ghost">창 새로고침</button></div></div>
     ${captureStudio(macro)}
     <div class="form-grid"><label>이름<input id="name" maxlength="100" value="${escapeHtml(macro.name)}"></label><label>설명<input id="description" maxlength="200" value="${escapeHtml(macro.description || '')}" placeholder="이 매크로의 용도"></label><label>시작 단축키 (준비 중)<input id="hotkey" value="${escapeHtml(macro.hotkey)}" placeholder="ctrl+alt+q"></label><label>프로세스 이름<input id="process" value="${escapeHtml(macro.target_window.process_name || '')}" placeholder="example.exe"></label><label>창 제목 포함<input id="title" value="${escapeHtml(macro.target_window.title_contains || '')}"></label><label class="checkbox"><input id="enabled" type="checkbox" ${macro.enabled ? 'checked' : ''}> 활성화 설정</label></div>
-    <label class="script-editor-label">Americano Script<textarea id="script" rows="8" placeholder="if image_detect 'confirm.png'\n  click 420 310\nendif">${escapeHtml(macro.script || '')}</textarea></label>
+    <details><summary>기존 스크립트 보관 (실행은 블록 순서 사용)</summary><label class="script-editor-label">Americano Script<textarea id="script" rows="8">${escapeHtml(macro.script || '')}</textarea></label></details>
     <section class="portable-panel"><button id="export-macro" class="button ghost">매크로 내보내기</button><p>설정과 이미지가 함께 들어 있는 .amacro 파일로 저장합니다.</p>${macro.binding ? `<p>${macro.binding.needs_overlay ? '가져오기 완료: 대상 창을 확인하고 오버레이를 재지정하세요.' : '오버레이 연결 완료'}${macro.binding.needs_review ? ' · 이미지 크기와 창 기준 좌표를 검토해야 합니다.' : ''}</p>${macro.binding.needs_review && !macro.binding.needs_overlay ? '<button id="binding-reviewed">이미지와 좌표 검토 완료</button>' : ''}` : ''}</section>
-    <div id="steps">${stepCards(macro.actions)}</div>
+    <div class="section-heading"><h3>블록으로 코딩하기</h3><button id="editor-mode">${editorMode === 'blocks' ? '상세 목록으로 보기' : '블록으로 보기'}</button></div><p>왼쪽 블록을 끌어 시작 블록 안에 연결하세요. 조건의 참·거짓과 반복 안에 동작을 넣을 수 있습니다.</p>
+    <div id="block-workspace" ${editorMode !== 'blocks' ? 'hidden' : ''}></div>
+    <div id="steps" ${editorMode === 'blocks' ? 'hidden' : ''}>${stepCards(macro.actions)}</div>
     <div class="editor-actions"><select id="action-type" aria-label="추가할 단계 유형">${typeOptions()}</select><button id="add">단계 추가</button><button id="save" class="button primary">저장</button><button id="run" class="button danger">실행</button><button id="preview" class="button ghost">입력 없이 미리보기</button></div>`;
   for (const [id, field] of [['name', 'name'], ['description', 'description'], ['hotkey', 'hotkey']]) $(`#${id}`).oninput = (event) => { macro[field] = event.target.value; changed(); renderList(); };
   $('#script').oninput = (event) => { macro.script = event.target.value; changed(); };
   $('#process').oninput = (event) => { macro.target_window.process_name = event.target.value; changed(); };
   $('#title').oninput = (event) => { macro.target_window.title_contains = event.target.value; changed(); };
-  $('#target-window').onchange = (event) => { const item = event.target._windows?.[event.target.value]; if (!item) return; macro.target_window = { title_contains: item.title, process_name: item.process_name, executable_path: item.executable_path }; macro.overlay = null; $('#title').value = item.title; $('#process').value = item.process_name; changed(); render(); };
+  $('#target-window').onchange = (event) => { if (!validFields()) return; const item = event.target._windows?.[event.target.value]; if (!item) return; macro.target_window = { title_contains: item.title, process_name: item.process_name, executable_path: item.executable_path }; if (macro.overlay) { macro.binding = { needs_overlay: true, needs_review: macro.binding?.needs_review || false, source_overlay: macro.overlay }; } macro.overlay = null; $('#title').value = item.title; $('#process').value = item.process_name; changed(); render(); };
   $('#refresh-windows').onclick = () => refreshWindows(macro);
   bindCapture(macro);
   $('#enabled').onchange = (event) => { macro.enabled = event.target.checked; changed(); renderList(); };
@@ -179,6 +220,7 @@ function render() {
   $('#delete').onclick = () => { if (!confirm(`“${macro.name}” 매크로를 삭제할까요?`)) return; documentData.macros = documentData.macros.filter((item) => item.id !== selectedId); selectedId = documentData.macros[0]?.id; changed(); render(); void save(); };
   $('#add').onclick = () => { if (!validFields()) return; macro.actions.push(defaults($('#action-type').value)); changed(); render(); };
   $('#save').onclick = save;
+  $('#editor-mode').onclick = () => { if (!validFields()) return; editorMode = editorMode === 'blocks' ? 'list' : 'blocks'; render(); };
   $('#export-macro').onclick = async () => {
     if (dirty && !(await save())) return;
     const result = await window.americano.request('macro-export', { macroId: selectedId });
@@ -188,6 +230,7 @@ function render() {
   $('#run').onclick = async () => { if (dirty && !(await save())) return; await request('start', { macroId: selectedId, startIndex: 0 }); };
   $('#preview').onclick = () => preview(0);
   bindSteps(macro);
+  mountBlocks(macro);
   if (backend) update(backend);
 }
 async function refreshWindows(macro) {
@@ -202,16 +245,17 @@ async function refreshWindows(macro) {
   } catch (error) { status.textContent = error.message; }
   finally { select.disabled = false; }
 }
-function validFields() { const invalid = $('#editor').querySelector(':invalid'); if (invalid) { invalid.reportValidity(); return false; } return true; }
+function validFields() { if (!syncBlocks()) return false; const invalid = [...$('#editor').querySelectorAll(':invalid')].find(field => editorMode === 'list' || !field.closest('#steps')); if (invalid) { invalid.reportValidity(); return false; } return true; }
 function countSteps(items) { return items.reduce((total, action) => total + 1 + (action.type === 'repeat' ? countSteps(action.actions) : action.type === 'condition' ? 1 + countSteps(action.then) + countSteps(action.else) : action.type === 'retry' ? 1 : 0), 0); }
 async function save() {
   if (saving || !validFields()) return false;
   saving = true;
+  $('#editor').inert = true;
   // Freeze editing until this snapshot has been acknowledged, preventing lost edits.
   const controls = [...document.querySelectorAll('#editor input, #editor textarea, #editor select, #editor button, #macros button, #new-button')];
   const disabled = controls.map((control) => control.disabled); controls.forEach((control) => { control.disabled = true; });
   const state = await request('save', { document: documentData });
-  saving = false; controls.forEach((control, index) => { control.disabled = disabled[index]; });
+  saving = false; $('#editor').inert = false; controls.forEach((control, index) => { control.disabled = disabled[index]; });
   if (!state) return false;
   documentData = state.document; dirty = false; render(); log('암호화 저장했습니다.'); return true;
 }
@@ -222,9 +266,7 @@ function createMacro() {
   documentData.macros.push(macro); selectedId = macro.id; changed(); render(); $('#name').focus(); $('#name').select();
 }
 $('#new-button').onclick = createMacro;
-const importButton = document.createElement('button');
-importButton.id = 'import-macro'; importButton.className = 'button ghost'; importButton.textContent = '매크로 가져오기';
-$('#macro-search').parentElement.after(importButton);
+const importButton = $('#import-macro');
 importButton.onclick = async () => {
   if (saving || (dirty && !(await save()))) return;
   importButton.disabled = true;

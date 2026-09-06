@@ -1,6 +1,7 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+app.on('web-contents-created', (_event, contents) => contents.on('console-message', (_event, level, message) => { if (level >= 2) console.error(message); }));
 app.setPath('userData', fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'americano-overlay-ui-')));
 // Deterministic frame fixture: Windows foreground policy is tested separately.
 const sharpFixture = require('sharp');
@@ -31,7 +32,22 @@ app.whenReady().then(async()=>{
   await overlay.webContents.executeJavaScript(`window.captureOverlay.select({x:20,y:20,width:24,height:24})`);
   await until(()=>main.webContents.executeJavaScript('Boolean(current()?.images.length && !dirty && !saving)'));
   await main.webContents.executeJavaScript(`document.querySelector('#add-rule').click(); current().loop={count:3,interval_ms:30}; changed();`);
-  await main.webContents.executeJavaScript(`const field = document.querySelector('[data-step="0.then.0"] [data-field="keys"]'); field.value='ctrl+a'; field.dispatchEvent(new Event('input'));`);
+  await main.webContents.executeJavaScript(`blockWorkspace.getAllBlocks(false).find(block => block.type === 'am_key').setFieldValue('ctrl+a', 'keys'); syncBlocks();`);
+  await main.webContents.executeJavaScript('save()');
+  await main.webContents.executeJavaScript(`document.querySelector('#block-workspace').scrollIntoView({block:'start'}); blockWorkspace.zoomToFit();`);
+  await sleep(150);
+  const start = await main.webContents.executeJavaScript(`(() => { const block=blockWorkspace.getAllBlocks(false).find(b=>b.type==='am_key'); const r=block.getSvgRoot().getBoundingClientRect(); return {x:Math.round(r.x+12),y:Math.round(r.y+12)}; })()`);
+  async function drag(from, to) {
+    main.webContents.sendInputEvent({type:'mouseMove',...from});
+    main.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...from});
+    for(let n=1;n<=12;n++){main.webContents.sendInputEvent({type:'mouseMove',button:'left',modifiers:['leftButtonDown'],x:Math.round(from.x+(to.x-from.x)*n/12),y:Math.round(from.y+(to.y-from.y)*n/12)});await sleep(16);}
+    main.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...to});await sleep(150);
+  }
+  const moved = {x:start.x+180,y:start.y+65};
+  await drag(start,moved);
+  if (!(await main.webContents.executeJavaScript(`blockWorkspace.getTopBlocks(false).length > 1`))) throw new Error('Pointer drag did not detach block');
+  await drag(moved,start);
+  if (!(await main.webContents.executeJavaScript(`syncBlocks()`))) throw new Error('Pointer drag did not reconnect block');
   await main.webContents.executeJavaScript('save()');
   const macro = await main.webContents.executeJavaScript('structuredClone(current())');
   if(macro.actions[0].then[0].keys!=='ctrl+a'||macro.actions[0].type!=='condition'||macro.loop.count!==3||!macro.images[0].path.endsWith('.aimg'))throw new Error('Saved workflow incomplete');
@@ -51,7 +67,25 @@ app.whenReady().then(async()=>{
   if (outline.isFocusable()) throw new Error('Outline must not take focus');
   await main.webContents.executeJavaScript("window.americano.request('overlay-hide')");
   if (!outline.isDestroyed()) throw new Error('Outline was not closed');
-  const result={ok:true,outlineTracks:true,capture:'deterministic fixture',overlay:macro.overlay,match,restored:await main.webContents.executeJavaScript('current().loop.count===3')};
+  const packageFile = path.join(app.getPath('userData'), 'roundtrip.amacro');
+  dialog.showSaveDialog = async () => ({canceled:false,filePath:packageFile});
+  dialog.showOpenDialog = async () => ({canceled:false,filePaths:[packageFile]});
+  await main.webContents.executeJavaScript(`document.querySelector('#export-macro').click()`);
+  await until(()=>fs.existsSync(packageFile));
+  await main.webContents.executeJavaScript(`document.querySelector('#import-macro').click()`);
+  await until(()=>main.webContents.executeJavaScript(`current().binding?.needs_overlay && documentData.macros.length === 2`));
+  await main.webContents.executeJavaScript(`window.americano.request('capture-overlay-open',{mode:'region',macro:current()})`);
+  overlay=await until(()=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/capture-overlay.html')));
+  await until(()=>overlay.webContents.executeJavaScript('meta.width > 1'));
+  await overlay.webContents.executeJavaScript(`window.captureOverlay.select({x:30,y:30,width:180,height:160})`);
+  await until(()=>main.webContents.executeJavaScript('Boolean(current()?.overlay && !current().binding.needs_overlay && !dirty && !saving)'));
+  const imported = await main.webContents.executeJavaScript('structuredClone(current())');
+  if(imported.actions[0].then[0].keys!=='ctrl+a'||imported.images[0].path===macro.images[0].path)throw new Error('Import lost blocks or asset remapping');
+  await main.webContents.executeJavaScript(`document.querySelector('#block-workspace').scrollIntoView({block:'start'}); blockWorkspace.zoomToFit();`);
+  await sleep(150);
+  const artifactDirectory = path.join(__dirname, '..', 'artifacts'); fs.mkdirSync(artifactDirectory,{recursive:true});
+  fs.writeFileSync(path.join(artifactDirectory,'block-editor.png'),(await main.webContents.capturePage()).toPNG());
+  const result={ok:true,pointerDrag:true,importExport:true,overlayRebound:true,outlineTracks:true,capture:'deterministic fixture',overlay:macro.overlay,match,restored:await main.webContents.executeJavaScript('current().loop.count===3')};
   console.log(JSON.stringify(result));app.quit();
  }catch(error){console.error(error);app.exit(1);}
 });

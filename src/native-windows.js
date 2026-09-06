@@ -18,6 +18,57 @@ const show = user.func('int __stdcall ShowWindow(void *hwnd, int command)');
 const iconic = user.func('int __stdcall IsIconic(void *hwnd)');
 const focus = user.func('int __stdcall SetForegroundWindow(void *hwnd)');
 const foreground = user.func('void * __stdcall GetForegroundWindow()');
+const windowFromPoint = user.func('void * __stdcall WindowFromPoint(AmericanoPoint point)');
+const ancestor = user.func('void * __stdcall GetAncestor(void *window, uint32_t flags)');
+const setCursor = user.func('int __stdcall SetCursorPos(int x, int y)');
+const getCursor = user.func('int __stdcall GetCursorPos(_Out_ AmericanoPoint *point)');
+const systemMetric = user.func('int __stdcall GetSystemMetrics(int index)');
+function cursorPosition() { const point = {}; if (!getCursor(point)) throw new Error('커서 위치를 읽지 못했습니다.'); return point; }
+async function moveCursor(point) {
+  if (!setCursor(point.x, point.y)) {
+    const size = process.arch === 'x64' ? 40 : 28;
+    const offset = process.arch === 'x64' ? 8 : 4;
+    const buffer = Buffer.alloc(size);
+    const left = systemMetric(76), top = systemMetric(77), width = systemMetric(78), height = systemMetric(79);
+    if (!width || !height) throw new Error('가상 화면 크기를 읽지 못했습니다.');
+    buffer.writeInt32LE(Math.floor((point.x - left + 0.5) * 65536 / width), offset);
+    buffer.writeInt32LE(Math.floor((point.y - top + 0.5) * 65536 / height), offset + 4);
+    buffer.writeUInt32LE(0xc001, offset + 12);
+    if (sendInput(1, buffer, size) !== 1) throw new Error('Windows가 마우스 입력을 허용하지 않았습니다.');
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  const actual = cursorPosition();
+  if (actual.x !== point.x || actual.y !== point.y) throw new Error(`요청한 위치로 커서를 이동하지 못했습니다 (${point.x},${point.y} → ${actual.x},${actual.y}).`);
+}
+function clickMouse(button = 'left') {
+  const flags = { left: [2, 4], right: [8, 16], middle: [32, 64] }[button];
+  if (!flags) throw new Error('지원하지 않는 마우스 버튼입니다.');
+  const size = process.arch === 'x64' ? 40 : 28;
+  const offset = process.arch === 'x64' ? 8 : 4;
+  const buffer = Buffer.alloc(size * 2);
+  flags.forEach((flag, index) => buffer.writeUInt32LE(flag, size * index + offset + 12));
+  const sent = sendInput(2, buffer, size);
+  if (sent === 1) sendInput(1, buffer.subarray(size), size);
+  if (sent !== 2) throw new Error('Windows 마우스 클릭이 거부되었습니다.');
+}
+function isPointInWindow(handle, x, y) {
+  const hit = windowFromPoint({ x, y });
+  const root = hit && ancestor(hit, 2);
+  return Boolean(root && koffi.address(root) === koffi.address(handle));
+}
+const sendInput = user.func('uint32_t __stdcall SendInput(uint32_t count, const void *inputs, int size)');
+function sendKeyboard(events) {
+  const size = process.arch === 'x64' ? 40 : 28;
+  const offset = process.arch === 'x64' ? 8 : 4;
+  const buffer = Buffer.alloc(events.length * size);
+  events.forEach((event, index) => {
+    const base = index * size; buffer.writeUInt32LE(1, base);
+    buffer.writeUInt16LE(event.key || 0, base + offset);
+    buffer.writeUInt16LE(event.scan || 0, base + offset + 2);
+    buffer.writeUInt32LE(event.flags || 0, base + offset + 4);
+  });
+  return sendInput(events.length, buffer, size);
+}
 const decode = (buffer) => buffer.toString('utf16le').split('\0')[0];
 function listWindows() {
   const result = [];
@@ -48,4 +99,4 @@ function isForeground(handle) {
   const active = foreground();
   return Boolean(active && koffi.address(active) === koffi.address(handle));
 }
-module.exports = { listWindows, geometry, activate, isForeground };
+module.exports = { listWindows, geometry, activate, isForeground, isPointInWindow, sendKeyboard, cursorPosition, moveCursor, clickMouse };
