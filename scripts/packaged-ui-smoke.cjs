@@ -20,7 +20,7 @@ app.whenReady().then(async () => {
     });
     await window.loadFile(path.join(archive, 'electron/index.html'));
     await window.webContents.executeJavaScript(`createMacro(); current().actions=[{type:'key',keys:'ctrl+a'}]; render();`);
-    assert.equal(await window.webContents.executeJavaScript(`blockWorkspace.getAllBlocks(false).some(block=>block.type==='am_key')`), true);
+    assert.equal(await window.webContents.executeJavaScript(`document.querySelector('#flow').textContent.includes('키 입력')`), true);
     assert.equal(await window.webContents.executeJavaScript('save()'), true);
     assert.equal(store.snapshot().macros[0].actions[0].keys, 'ctrl+a');
     assert.deepEqual(errors, []);

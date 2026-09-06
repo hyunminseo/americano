@@ -1,0 +1,9 @@
+html, body { margin: 0; padding: 0; background: #fbf8f1; color: #2b2620; font-family: "Trebuchet MS", "Segoe UI", sans-serif; }
+main { padding: 14px 16px 20px; }
+.eyebrow { margin: 0; font-size: 11px; letter-spacing: 2px; color: #8a7a5f; }
+h2 { margin: 4px 0 6px; font-size: 18px; }
+#run-status { margin: 0 0 10px; font-size: 13px; font-weight: bold; }
+#steps { margin: 0; padding: 0; list-style: none; font-size: 13px; }
+#steps li { padding: 5px 8px; margin: 3px 0; background: #fff; border: 1px solid #e2d9c6; border-radius: 6px; }
+#steps li.current { background: #e8f6df; border-color: #22c55e; font-weight: bold; }
+#run-error { color: #b91c1c; font-size: 12px; white-space: pre-wrap; }

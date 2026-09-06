@@ -6,6 +6,8 @@ const { validateDocument } = require('./macros');
 const MAX_PACKAGE_BYTES = 32 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const normalize = macro => validateDocument({ version: 2, macros: [macro] }).macros[0];
+const branchName = (part) => typeof part === 'number' ? part + 1 : ({ test: '검사', then: '참', else: '거짓', action: '재시도' }[part] || part);
+const stepLabel = (step) => step.map(branchName).join('.');
 function walk(items, visit) {
   for (const action of items) {
     visit(action);
@@ -16,6 +18,11 @@ function walk(items, visit) {
 }
 function inside(point, area) {
   return area && point.x >= area.x && point.y >= area.y && point.x < area.x + area.width && point.y < area.y + area.height;
+}
+// 이미지 참조를 가진 액션 종류. smart_click은 기대 화면 자산을 추가로 가진다.
+function imageRefs(action) {
+  if (action.type === 'smart_click') return ['image', ...(action.expect_image ? ['expect_image'] : [])];
+  return action.type.startsWith('image_') ? ['image'] : [];
 }
 async function png(bytes) {
   if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error('이미지 크기 제한은 8MB입니다.');
@@ -29,8 +36,23 @@ async function readPackage(file) {
 }
 async function exportMacro(raw, store) {
   const macro = normalize(raw);
+  const refs = [];
+  const collect = (items, prefix = []) => {
+    (items || []).forEach((action, index) => {
+      const step = [...prefix, index];
+      for (const field of imageRefs(action)) refs.push({ file: action[field], step: step.join('.') });
+      if (action.type === 'repeat') collect(action.actions, step);
+      if (action.type === 'condition') { collect([action.test], [...step, 'test']); collect(action.then, [...step, 'then']); collect(action.else, [...step, 'else']); }
+      if (action.type === 'retry') collect([action.action], [...step, 'action']);
+    });
+  };
+  collect(macro.actions);
+  const badAsset = macro.images.find((asset) => !asset.path);
+  if (badAsset) throw new Error(`보관함 "${badAsset.name || '이름 없음'}"의 이미지 파일이 없습니다.`);
+  const culprit = refs.find((ref) => !ref.file);
+  if (culprit) throw new Error(`${stepLabel(culprit.step.split('.').map((part) => /^\d+$/.test(part) ? Number(part) : part))}단계의 기준 이미지를 먼저 선택하세요.`);
   const paths = new Set(macro.images.map(asset => asset.path));
-  walk(macro.actions, action => { if (action.type.startsWith('image_')) paths.add(action.image); });
+  for (const ref of refs) paths.add(ref.file);
   if (paths.size > 200) throw new Error('이미지는 최대 200개까지 내보낼 수 있습니다.');
   const assets = []; const references = new Map();
   let size = 0;
@@ -50,7 +72,7 @@ async function exportMacro(raw, store) {
   }
   let needsReview = macro.binding?.needs_review || false;
   walk(macro.actions, action => {
-    if (action.type.startsWith('image_')) action.image = references.get(action.image);
+    for (const field of imageRefs(action)) action[field] = references.get(action[field]);
     if (['click', 'mouse_move'].includes(action.type) && action.coordinate_space !== 'overlay') {
       if (inside(action, macro.overlay)) {
         action.x -= macro.overlay.x; action.y -= macro.overlay.y; action.coordinate_space = 'overlay';
@@ -79,7 +101,7 @@ async function decodePackage(bytes) {
   }
   const check = id => { if (!assets.has(id)) throw new Error('패키지 안에 참조된 이미지가 없습니다.'); };
   macro.images.forEach(asset => check(asset.path));
-  walk(macro.actions, action => { if (action.type.startsWith('image_')) check(action.image); });
+  walk(macro.actions, action => { for (const field of imageRefs(action)) check(action[field]); });
   macro.id = randomUUID(); macro.enabled = false; macro.hotkey = '';
   delete macro.target_window.executable_path;
   macro.binding = { needs_overlay: true, needs_review: macro.binding?.needs_review || false, source_overlay: macro.overlay || macro.binding?.source_overlay || null };
@@ -101,7 +123,7 @@ async function importMacro(bytes, store) {
       const metadata = await sharp(assets.get(id)).metadata();
       macro.images.push({ id: randomUUID(), name: id, path: file, preview: `data:image/png;base64,${assets.get(id).toString('base64')}`, region: { x: 0, y: 0, width: metadata.width, height: metadata.height } });
     }
-    walk(macro.actions, action => { if (action.type.startsWith('image_')) action.image = paths.get(action.image); });
+    walk(macro.actions, action => { for (const field of imageRefs(action)) action[field] = paths.get(action[field]); });
     const document = store.snapshot(); document.macros.push(macro);
     await store.save(document);
     return macro.id;
@@ -119,7 +141,7 @@ function rebindOverlay(raw, region) {
   }
   // Preserve DIP offsets; stretching coordinates would guess the target app's layout.
   walk(macro.actions, action => {
-    if (action.type.startsWith('image_')) action.region = { ...macro.overlay };
+    if (action.type === 'smart_click' || action.type.startsWith('image_')) action.region = { ...macro.overlay };
   });
   return macro;
 }

@@ -24,7 +24,7 @@ function region(value, name = 'region') {
   };
 }
 function imageAction(item, base) {
-  return { ...base, image: string(item.image, 'image', 2048), monitor: integer(item.monitor ?? 1, 'monitor', 1, 16), threshold: number(item.threshold ?? 0.9, 'threshold', 0, 1), region: region(item.region), poll_interval_ms: integer(item.poll_interval_ms ?? 100, 'poll_interval_ms', 30, 60000) };
+  return { ...base, image: string(item.image, 'image', 2048), monitor: integer(item.monitor ?? 1, 'monitor', 1, 16), threshold: number(item.threshold ?? 0.9, 'threshold', 0, 1), zone: integer(item.zone ?? 0, 'zone', 0, 9), region: region(item.region), poll_interval_ms: integer(item.poll_interval_ms ?? 100, 'poll_interval_ms', 30, 60000) };
 }
 const modifiers = ['ctrl', 'alt', 'shift', 'win'];
 const aliases = { control: 'ctrl', commandorcontrol: 'ctrl', super: 'win', meta: 'win', escape: 'esc' };
@@ -48,10 +48,16 @@ function actions(items, depth = 0, budget = { count: 0 }) {
       case 'key': return { ...base, keys: keys(item.keys) };
       case 'text': return { ...base, text: string(item.text, 'text', 10000) };
       case 'image_detect': case 'image_wait': case 'image_click': return imageAction(item, base);
+      case 'smart_click': {
+        const result = imageAction(item, base);
+        result.verify_interval_ms = integer(item.verify_interval_ms ?? 800, 'verify_interval_ms', 100, 10000);
+        if (item.expect_image !== undefined && item.expect_image !== '') result.expect_image = string(item.expect_image, 'expect_image', 2048);
+        return result;
+      }
       case 'scroll': return { ...base, delta_x: integer(item.delta_x ?? 0, 'delta_x', -100000, 100000), delta_y: integer(item.delta_y ?? 0, 'delta_y', -100000, 100000) };
       case 'retry': {
         const nested = actions([item.action], depth + 1, budget)[0];
-        if (!['image_detect', 'image_wait', 'image_click'].includes(nested.type)) fail('retry는 이미지 액션 하나만 감쌀 수 있습니다.');
+        if (!['image_detect', 'image_wait', 'image_click', 'smart_click'].includes(nested.type)) fail('retry는 이미지 액션 하나만 감쌀 수 있습니다.');
         return { ...base, count: integer(item.count ?? 0, 'retry.count', 0, 10), interval_ms: integer(item.interval_ms ?? 200, 'retry.interval_ms', 0, 60000), action: nested };
       }
       case 'condition': {

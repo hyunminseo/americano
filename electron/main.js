@@ -6,7 +6,7 @@ const { MacroStore } = require('../src/store');
 const { MacroRunner } = require('../src/runner');
 const { exportMacro, importMacro, readPackage, rebindOverlay } = require('../src/portable');
 const { LicenseManager, readDeviceMacs, readLimited } = require('../src/license');
-const { loadTemplate, findTemplate } = require('../src/matcher');
+const { findZoned } = require('../src/detect');
 const { createInputAdapter } = require('../src/input-adapter');
 const { listWindows, findWindow } = require('../src/windows');
 const { captureTarget, physicalRegion } = require('../src/overlay');
@@ -21,8 +21,45 @@ let captureOpening = false;
 let captureSaving = false;
 let outline;
 let outlineTimer;
+let progressWindow = null;
+let progressMacroId = null;
+function closeProgress() { if (progressWindow && !progressWindow.isDestroyed()) progressWindow.destroy(); progressWindow = null; progressMacroId = null; }
+function pushProgress(state) {
+  if (!progressWindow || progressWindow.isDestroyed() || !progressMacroId) return;
+  const macro = state.document.macros.find((item) => item.id === progressMacroId) || null;
+  if (!macro) { progressWindow.webContents.send('macro-progress', { macro: null, run: state.run }); return; }
+  progressWindow.webContents.send('macro-progress', { macro, run: state.run });
+}
 function closeOutline() { clearInterval(outlineTimer); outlineTimer = null; if (outline && !outline.isDestroyed()) outline.destroy(); outline = null; }
-async function showOutline(macro) {
+// 실제 클릭 지점에 0.8초 동안 녹색 링을 표시한다. 자동화 흐름을 바꾸지 않는다.
+function flashClick(point) {
+  try {
+    const marker = new BrowserWindow({ x: Math.round(point.x - 22), y: Math.round(point.y - 22), width: 44, height: 44,
+      show: false, frame: false, transparent: true, focusable: false, skipTaskbar: true, alwaysOnTop: true, resizable: false, movable: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    marker.setIgnoreMouseEvents(true);
+    marker.setAlwaysOnTop(true, 'screen-saver');
+    marker.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><html><body style="margin:0"><div style="width:36px;height:36px;margin:4px;border:5px solid #22c55e;border-radius:50%;box-sizing:border-box"></div></body></html>'));
+    marker.showInactive();
+    setTimeout(() => { if (!marker.isDestroyed()) marker.close(); }, 800).unref();
+  } catch { /* 표시 실패는 실행에 영향을 주지 않는다. */ }
+}
+// 탐지에 성공한 프레임을 근거로 저장한다. 최신 30개만 유지하며 실패해도 무시한다.
+async function saveMatchShot(framePng, match, label) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'match-shots');
+    await fs.promises.mkdir(dir, { recursive: true });
+    const meta = await sharp(framePng).metadata();
+    const cx = match.x + match.width / 2;
+    const cy = match.y + match.height / 2;
+    const overlay = `<svg width="${meta.width}" height="${meta.height}"><rect x="${match.x}" y="${match.y}" width="${match.width}" height="${match.height}" fill="none" stroke="lime" stroke-width="3"/><circle cx="${cx}" cy="${cy}" r="6" fill="red"/><text x="${match.x}" y="${Math.max(16, match.y - 6)}" fill="lime" font-size="18">${label} ${match.score.toFixed(3)}</text></svg>`;
+    const annotated = await sharp(framePng).composite([{ input: Buffer.from(overlay), left: 0, top: 0 }]).png().toBuffer();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    await fs.promises.writeFile(path.join(dir, `${stamp}-${label}-${match.score.toFixed(3)}.png`), annotated);
+    const files = (await fs.promises.readdir(dir)).sort();
+    await Promise.all(files.slice(0, Math.max(0, files.length - 30)).map((file) => fs.promises.unlink(path.join(dir, file)).catch(() => {})));
+  } catch { /* 근거 저장은 실행에 영향을 주지 않는다. */ }
+}async function showOutline(macro) {
   closeOutline();
   if (!macro.overlay) throw new Error('오버레이 영역을 먼저 저장하세요.');
   const window = new BrowserWindow({show: false, frame: false, transparent: true, focusable: false, skipTaskbar: true, alwaysOnTop: true, resizable: false, webPreferences: {sandbox: true, contextIsolation: true, nodeIntegration: false}});
@@ -53,17 +90,18 @@ async function refreshIdentity() {
 }
 let startupError = null;
 let shortcutsReady = false;
+let f7Ready = false;
 let quitting = false;
 let shutdownPromise = null;
 const shutdownDeadlineMs = 5000;
 const page = pathToFileURL(path.join(__dirname, 'index.html')).href;
 function state() {
   return { document: store?.ready ? store.snapshot() : { version: 2, macros: [] }, run: runner.state(), error: startupError,
-    storageReady: Boolean(store?.ready), shortcutsReady, executionAvailable: shortcutsReady,
+    storageReady: Boolean(store?.ready), shortcutsReady, f7Ready, executionAvailable: shortcutsReady,
     license: license.state(), variant,
     executionReason: license.state().valid ? '라이선스 인증 완료. 선택한 대상 창에서 실행할 수 있습니다.' : license.state().message };
 }
-function notify() { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('backend-state', state()); }
+function notify() { if (mainWindow && !mainWindow.isDestroyed()) { const current = state(); mainWindow.webContents.send('backend-state', current); pushProgress(current); } }
 function createWindow() {
   mainWindow = new BrowserWindow({ width: 1180, height: 850, minWidth: 900, minHeight: 650, backgroundColor: '#f5f1ea',
     icon: path.join(__dirname, 'assets', 'coffee.ico'),
@@ -119,12 +157,15 @@ else {
       const source = action.image.endsWith('.aimg') ? await store.readImage(action.image) : action.image;
       const area = macro.overlay || action.region;
       const shot = await captureTarget(macro.target_window, area, control);
-      const frame = await sharp(shot.buffer).resize({ width: area.width, height: area.height }).removeAlpha().greyscale().raw().toBuffer({ resolveWithObject: true });
-      const template = await loadTemplate(source);
-      if (template.info.width > frame.info.width || template.info.height > frame.info.height) throw new Error('기준 이미지가 오버레이 검색 영역보다 큽니다.');
-      return findTemplate(frame, template, action.threshold, control);
+      const frame = await sharp(shot.buffer).resize({ width: area.width, height: area.height }).png().toBuffer();
+      const home = action.image.endsWith('.aimg')
+        ? macro.images?.find((asset) => asset.path === action.image)?.region ?? null
+        : null;
+      const match = await findZoned(frame, source, area, action.zone ?? 0, action.threshold, control, home);
+      if (match) void saveMatchShot(frame, match, action.type);
+      return match;
     };
-    runner = new MacroRunner({ input: createInputAdapter(), imageMatcher, authorize: () => license.authorize(), onState: () => notify() });
+    runner = new MacroRunner({ input: createInputAdapter(), imageMatcher, authorize: () => license.authorize(), onState: () => notify(), onClickPoint: (point) => flashClick(point) });
     let lastLicense = JSON.stringify(license.state());
     let identityTicks = 0;
     licenseTimer = setInterval(() => {
@@ -139,6 +180,7 @@ else {
     const pauseReady = globalShortcut.register('F8', () => runner.pause());
     const stopReady = globalShortcut.register('F9', () => { void runner.stop(); });
     shortcutsReady = pauseReady && stopReady;
+    f7Ready = globalShortcut.register('F7', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('start-hotkey'); });
     if (!shortcutsReady) startupError = [startupError, 'F8/F9 등록에 실패했습니다. 다른 앱의 단축키 설정을 확인하세요.'].filter(Boolean).join('\n');
     ipcMain.handle('backend:request', async (event, command, payload = {}) => {
       try {
@@ -162,6 +204,29 @@ else {
             return { ok: true, macroId, state: state() };
           }
           case 'overlay-rebind': return { ok: true, macro: rebindOverlay(payload.macro, payload.region), state: state() };
+          case 'progress-toggle': {
+            if (payload.open === true && progressWindow && !progressWindow.isDestroyed()) return { ok: true, open: true, state: state() };
+            if (progressWindow && !progressWindow.isDestroyed()) { closeProgress(); return { ok: true, open: false, state: state() }; }
+            const found = store.snapshot().macros.find((item) => item.id === payload.macroId);
+            if (!found) throw new Error('매크로를 찾을 수 없습니다.');
+            progressMacroId = found.id;
+            progressWindow = new BrowserWindow({ width: 360, height: 560, minWidth: 280, minHeight: 300, title: '매크로 진행 상황',
+              icon: path.join(__dirname, 'assets', 'coffee.ico'),
+              webPreferences: { preload: path.join(__dirname, 'progress-preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+            progressWindow.setAlwaysOnTop(true);
+            progressWindow.on('closed', () => { progressWindow = null; progressMacroId = null; });
+            await progressWindow.loadFile(path.join(__dirname, 'progress.html'));
+            pushProgress(state());
+            return { ok: true, open: true, state: state() };
+          }
+          case 'overlay-auto': {
+            const macro = require('../src/macros').validateDocument({ version: 2, macros: [payload.macro] }).macros[0];
+            const target = await findWindow(macro.target_window, 10000);
+            const client = require('../src/native-windows').geometry(target.handle);
+            if (client.width < 8 || client.height < 8) throw new Error('대상 창의 영역을 읽지 못했습니다. 최소화를 해제하고 다시 시도하세요.');
+            const { fullClientOverlay } = require('../src/overlay');
+            return { ok: true, macro: rebindOverlay(macro, fullClientOverlay(client)), state: state() };
+          }
           case 'license-device': await refreshIdentity(); return { ok: true, macs: currentMacs, state: state() };
           case 'license-check': await refreshIdentity(); license.authorize(); break;
           case 'license-import': {
@@ -172,6 +237,10 @@ else {
           case 'image-select': {
             const selection = await dialog.showOpenDialog(mainWindow, { title: '감지할 이미지 선택', properties: ['openFile'], filters: [{ name: '이미지', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }] });
             return { ok: true, path: selection.canceled ? '' : selection.filePaths[0], state: state() };
+          }
+          case 'image-delete': {
+            if (!payload || typeof payload.path !== 'string') throw new Error('잘못된 요청입니다.');
+            await store.deleteImage(payload.path); break;
           }
           case 'window-list': return { ok: true, windows: (await listWindows()).map(({handle, ...info}) => info), state: state() };
           case 'overlay-hide': closeOutline(); break;
@@ -238,6 +307,7 @@ else {
     event.preventDefault(); quitting = true;
     clearInterval(licenseTimer);
     closeOutline();
+    closeProgress();
     globalShortcut.unregisterAll();
     let finishShutdown;
     shutdownPromise = new Promise((resolve) => { finishShutdown = resolve; });

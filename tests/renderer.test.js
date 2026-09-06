@@ -11,7 +11,7 @@ function renderer() {
       if (!elements.has(selector)) elements.set(selector, { innerHTML: '', querySelectorAll: () => [] });
       return elements.get(selector);
     } },
-    window: { americano: { request: () => new Promise(() => {}), onState: () => {} }, addEventListener: () => {} },
+    window: { americano: { request: () => new Promise(() => {}), onState: () => {}, onStartHotkey: () => {}, onCaptureResult: undefined }, addEventListener: () => {}, Blockly: undefined, MacroBlocks: undefined },
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../electron/renderer.js'), 'utf8'), context);
   return { context, elements };
@@ -24,12 +24,52 @@ test('empty workspace offers first macro setup without a configuration file', ()
   assert.equal(typeof elements.get('#first-macro').onclick, 'function');
 });
 
-test('nested repeats render editable cards and escape user text without raw JSON', () => {
+test('asset usages map nested image references to steps', () => {
   const { context } = renderer();
-  const html = vm.runInContext(`stepCards([{ type: 'repeat', count: 2, actions: [{ type: 'text', text: '<script>alert(1)</script>' }] }])`, context);
-  assert.match(html, /data-step="0.0"/);
-  assert.match(html, /반복 내부 단계 추가/);
-  assert.match(html, /data-field="text"/);
+  const json = vm.runInContext(`JSON.stringify([...assetUsages({ actions: [
+    { type: 'key', keys: 'enter' },
+    { type: 'condition', test: { type: 'image_detect', image: 'a.png' }, then: [{ type: 'smart_click', image: 'b.png', expect_image: 'a.png' }], else: [] },
+    { type: 'repeat', count: 2, actions: [{ type: 'image_click', image: 'a.png' }] },
+  ] }).entries()])`, context);
+  assert.deepEqual(JSON.parse(json), [
+    ['a.png', [{ step: '2.검사.1', type: 'image_detect' }, { step: '2.참.1', type: 'smart_click' }, { step: '3.1', type: 'image_click' }]],
+    ['b.png', [{ step: '2.참.1', type: 'smart_click' }]],
+  ]);
+});
+test('workflow renders nested branches and escapes node text', () => {
+  const { context } = renderer();
+  const html = vm.runInContext(`workflowHtml({ images: [], actions: [{ type: 'repeat', count: 2, actions: [{ type: 'text', text: '<script>alert(1)</script>' }] }] })`, context);
+  assert.match(html, /data-step="0\.0"/);
+  assert.match(html, /반복 내부|반복 ×2/);
+  assert.match(html, /data-add="0"/);
   assert.match(html, /&lt;script&gt;/);
-  assert.doesNotMatch(html, /<script>|textarea|JSON|\?\?\?/);
+  assert.doesNotMatch(html, /<script>|textarea|JSON/);
+});
+test('workflow moves nodes across containers and guards fixed paths', () => {
+  const { context } = renderer();
+  const moved = vm.runInContext(`JSON.stringify((() => {
+    const m = { actions: [{ type: 'key', keys: 'a' }, { type: 'repeat', count: 2, actions: [{ type: 'wait', duration_ms: 1 }] }] };
+    const key = moveStepTo(m, '0', '1', 1);
+    return { key, types: m.actions[0].actions.map((a) => a.type) };
+  })())`, context);
+  assert.deepEqual(JSON.parse(moved), { key: '1.1', types: ['wait', 'key'] });
+  assert.throws(() => vm.runInContext(`moveStepTo({ actions: [{ type: 'repeat', count: 1, actions: [] }] }, '0', '0', 0)`, context), /자기 안/);
+  assert.throws(() => vm.runInContext(`moveStepTo({ actions: [{ type: 'condition', test: { type: 'image_detect' }, then: [], else: [] }] }, '0.test.0', '', 0)`, context), /고정된 단계/);
+});
+test('inspector numbers match workflow nodes and condition shows test image picker', () => {
+  const { context, elements } = renderer();
+  vm.runInContext(`selectedId = 'm1'; documentData = { version: 2, macros: [{ id: 'm1', images: [{ id: 'a', name: '버튼', path: 'b.png' }], actions: [{ type: 'wait', duration_ms: 100 }, { type: 'condition', test: { type: 'image_detect', image: '' }, then: [], else: [] }] }] }; selPath = '1';`, context);
+  vm.runInContext(`renderInspector(documentData.macros[0])`, context);
+  const html = elements.get('#inspector').innerHTML;
+  assert.match(html, /2 · 조건 분기/);
+  assert.match(html, /검사 이미지/);
+  assert.match(html, /버튼/);
+});
+test('workflow moves nodes and resolves nested paths', () => {
+  const { context } = renderer();
+  const order = vm.runInContext(`JSON.stringify((() => { const m = { actions: [{type:'key',keys:'a'},{type:'key',keys:'b'}] }; moveStep(m, '1', -1); return m.actions.map(a=>a.keys); })())`, context);
+  assert.deepEqual(JSON.parse(order), ['b', 'a']);
+  const resolved = vm.runInContext(`JSON.stringify(resolvePath({ actions: [{ type: 'condition', test: { type: 'image_detect' }, then: [{ type: 'key' }], else: [] }] }, '0.then.0').action.type)`, context);
+  assert.deepEqual(JSON.parse(resolved), 'key');
+  assert.throws(() => vm.runInContext(`resolvePath({ actions: [] }, '0')`, context), /찾지 못했습니다/);
 });

@@ -26,6 +26,7 @@ function createInputAdapter({ windowAdapter = { prepareWindow, screenPoint }, ke
           await control.checkpoint();
           const native = nativeAdapter;
           if (!native.isForeground(prepared.window.handle) || !native.isPointInWindow(prepared.window.handle, point.x, point.y)) throw new Error('대상 창이 바뀌어 클릭을 중단했습니다.');
+          if (control.onClickPoint) { try { control.onClickPoint({ x: point.x, y: point.y }); } catch { /* 표시는 실패해도 클릭을 막지 않는다. */ } }
           native.clickMouse(action.button || 'left');
         }
         return;
