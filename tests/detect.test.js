@@ -46,3 +46,17 @@ test('absent template returns null and oversized template throws', async () => {
   assert(direct.score >= 0.9, `일치율이 낮습니다: ${direct.score}`);
   await assert.rejects(findCoarseToFine(exact, background1, 0.9, null), /검색 영역보다 큽니다/);
 });
+test('capture position is searched first with zone and full fallback', async () => {
+  const area = { x: 0, y: 0, width: 1280, height: 960 };
+  assert.deepEqual(homeWindow(area, { x: 500, y: 300, width: 100, height: 50 }), { x: 452, y: 252, width: 196, height: 146 });
+  assert.equal(homeWindow(area, { x: 5000, y: 5000, width: 10, height: 10 }), null);
+  assert.equal(homeWindow(area, null), null);
+  const frame = await sharp(background1).png().toBuffer();
+  const full = { x: 0, y: 0, width: 1274, height: 952 };
+  const homeHit = await findZoned(frame, target1, full, 0, 0.9, null, { x: 528, y: 154, width: 232, height: 46 });
+  assert(homeHit, '캡처 위치에서 찾지 못했습니다.');
+  assert(Math.abs(homeHit.x + homeHit.width / 2 - 644) <= 4);
+  const homeMiss = await findZoned(frame, target1, full, 8, 0.9, null, { x: 0, y: 800, width: 100, height: 60 });
+  assert(homeMiss, '잘못된 캡처 위치에서 구역·전체 폴백으로 찾지 못했습니다.');
+  assert(Math.abs(homeMiss.x + homeMiss.width / 2 - 644) <= 4);
+});
