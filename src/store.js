@@ -38,6 +38,32 @@ class MacroStore {
     this.document = document; this.ready = true; return this.snapshot();
   }
   snapshot() { if (!this.ready) throw new Error('저장소가 준비되지 않았습니다.'); return structuredClone(this.document); }
+  saveImage(buffer) {
+    const job = this.queue.then(async () => {
+      if (!this.ready || !Buffer.isBuffer(buffer) || buffer.length > MAX_BYTES) throw new Error('이미지 저장소 또는 크기가 잘못되었습니다.');
+      const nonce = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', this.key, nonce);
+      cipher.setAAD(Buffer.from('AI01'));
+      const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
+      const file = path.join(this.directory, `${crypto.randomUUID()}.aimg`);
+      const temporary = `${file}.tmp`;
+      try {
+        await fs.writeFile(temporary, Buffer.concat([Buffer.from('AI01'), nonce, cipher.getAuthTag(), encrypted]), { flag: 'wx' });
+        await fs.rename(temporary, file);
+      } finally { await fs.unlink(temporary).catch(() => {}); }
+      return file;
+    });
+    this.queue = job.catch(() => {}); return job;
+  }
+  async readImage(file) {
+    if (!this.ready || path.dirname(path.resolve(file)) !== path.resolve(this.directory) || !/^[a-f0-9-]+\.aimg$/.test(path.basename(file))) throw new Error('허용되지 않은 이미지입니다.');
+    if ((await fs.stat(file)).size > MAX_BYTES + 32) throw new Error('이미지 크기 제한을 초과했습니다.');
+    const bytes = await fs.readFile(file);
+    if (bytes.length < 32 || bytes.subarray(0, 4).toString() !== 'AI01') throw new Error('잘못된 이미지 형식입니다.');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, bytes.subarray(4, 16));
+    decipher.setAAD(Buffer.from('AI01')); decipher.setAuthTag(bytes.subarray(16, 32));
+    return Buffer.concat([decipher.update(bytes.subarray(32)), decipher.final()]);
+  }
   save(raw) {
     const document = validateDocument(raw);
     const job = this.queue.then(async () => {

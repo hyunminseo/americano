@@ -61,6 +61,10 @@ function actions(items, depth = 0, budget = { count: 0 }) {
       }
       case 'mouse_move': case 'click': {
         const result = { ...base, x: integer(item.x, 'x', 0, 100000), y: integer(item.y, 'y', 0, 100000) };
+        if (item.coordinate_space !== undefined) {
+          if (!['client', 'overlay'].includes(item.coordinate_space)) fail('좌표 기준이 잘못되었습니다.');
+          result.coordinate_space = item.coordinate_space;
+        }
         if (type === 'click') {
           if (!['left', 'right', 'middle'].includes(item.button ?? 'left')) fail('지원하지 않는 마우스 버튼입니다.');
           result.button = item.button ?? 'left';
@@ -100,10 +104,21 @@ function validateDocument(raw) {
     if (script) {
       try { parseScript(script); } catch (error) { fail(`script: ${error.message}`); }
     }
-    return { id, name, description: string(item.description ?? '', 'description', 2000), script, enabled: item.enabled, hotkey, target_window, actions: actions(item.actions) };
+    const images = Array.isArray(item.images) ? item.images.slice(0, 200).map((image) => {
+      if (!image || typeof image !== 'object') fail('이미지 자산이 잘못되었습니다.');
+      return { id: string(image.id, 'image.id', 64), name: string(image.name, 'image.name', 200).trim(), path: string(image.path, 'image.path', 4096), preview: string(image.preview ?? '', 'image.preview', 2000000), region: region(image.region, 'image.region') };
+    }) : [];
+    const overlay = item.overlay == null ? null : region(item.overlay, 'overlay');
+    const loop = { count: integer(item.loop?.count ?? 1, 'loop.count', 1, 10000), interval_ms: integer(item.loop?.interval_ms ?? 500, 'loop.interval_ms', 30, 60000) };
+    const binding = item.binding == null ? null : {
+      needs_overlay: item.binding.needs_overlay === true,
+      needs_review: item.binding.needs_review === true,
+      source_overlay: item.binding.source_overlay == null ? null : region(item.binding.source_overlay, 'binding.source_overlay'),
+    };
+    return { id, name, description: string(item.description ?? '', 'description', 2000), script, enabled: item.enabled, hotkey, target_window, overlay, loop, images, actions: actions(item.actions), binding };
   }), global: { pause_hotkey: 'f8', stop_hotkey: 'f9', default_timeout_ms: 10000 } };
 }
 function newMacro() {
-  return { id: randomUUID(), name: '새 매크로', description: '', script: '', enabled: false, hotkey: '', target_window: {}, actions: [{ type: 'wait', duration_ms: 1000 }] };
+  return { id: randomUUID(), name: '새 매크로', description: '', script: '', enabled: false, hotkey: '', target_window: {}, images: [], actions: [{ type: 'wait', duration_ms: 1000 }] };
 }
 module.exports = { MacroError, validateDocument, newMacro, keys };

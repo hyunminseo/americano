@@ -21,6 +21,7 @@ function createInputAdapter({ windowAdapter = { prepareWindow, screenPoint } } =
     async execute(action, target, control) {
       await control.checkpoint();
       const prepared = await windowAdapter.prepareWindow(target, control);
+      await control.checkpoint();
       if (action.type === 'key') { await press(action.keys); return; }
       if (action.type === 'text') { await keyboard.type(action.text); return; }
       if (action.type === 'scroll') {

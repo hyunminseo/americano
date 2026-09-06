@@ -40,3 +40,14 @@ test('missing key and unavailable protection never downgrade to plaintext', asyn
   await assert.rejects(new MacroStore(dir, protector).open(), /키가 없습니다/);
   await assert.rejects(new MacroStore(dir, { isEncryptionAvailable: () => false }).open(), /보호 저장소/);
 });
+
+test('captured images are encrypted, recover after restart, and reject tampering', async t => {
+  const {dir,store}=await setup(t); const image=Buffer.from('private captured image');
+  const file=await store.saveImage(image);
+  const bytes=await fs.readFile(file); assert.equal(bytes.includes(image),false);
+  const restored=new MacroStore(dir,protector); await restored.open();
+  assert.deepEqual(await restored.readImage(file),image);
+  bytes[bytes.length-1]^=1; await fs.writeFile(file,bytes);
+  await assert.rejects(restored.readImage(file));
+  await assert.rejects(restored.readImage(path.join(dir,'..','outside.aimg')));
+});

@@ -84,3 +84,26 @@ test('condition selects only the matching branch', async () => {
   await runner.active.done;
   assert.equal(runner.state().outcome, 'completed'); assert.deepEqual(inputs, ['text']);
 });
+
+test('overlay loop reevaluates conditions and executes true branch only on matches', async () => {
+  let scans = 0; const inputs = [];
+  const a = { ...macro([{ type: 'condition', test: {type:'image_detect', image:'saved.aimg'}, then:[{type:'key',keys:'enter'}], else:[] }]), overlay:{x:10,y:20,width:100,height:80}, loop:{count:3,interval_ms:30} };
+  const runner = new MacroRunner({authorize: async()=>{}, imageMatcher: async (_action, _control, snapshot) => { assert.deepEqual(snapshot.overlay, a.overlay); return ++scans === 2 ? {x:1,y:2,width:3,height:4} : null; }, input:{execute:async action=>inputs.push(action),releaseAll:async()=>{}}});
+  runner.start(a); await runner.active.done;
+  assert.equal(scans,3); assert.equal(inputs.length,1); assert.equal(runner.state().iteration,3);
+});
+test('stop cancels the interval before another loop can run', async () => {
+  let scans=0; let scanned;
+  const first = new Promise(resolve=>{scanned=resolve;});
+  const runner = new MacroRunner({authorize:async()=>{}, imageMatcher:async()=>{scans++;scanned();return null;}});
+  runner.start({...macro([{type:'condition',test:{type:'image_detect',image:'a'},then:[],else:[]}]),loop:{count:10,interval_ms:60000}});
+  await first; await runner.stop();
+  assert.equal(scans,1); assert.equal(runner.state().outcome,'cancelled');
+});
+
+test('image scan timeout prevents a matching branch from running', async () => {
+  let inputs=0;
+  const runner=new MacroRunner({authorize:async()=>{},imageMatcher:async(_action,control)=>{while(true){await sleep(2);await control.checkpoint();}},input:{execute:async()=>{inputs++;},releaseAll:async()=>{}}});
+  runner.start(macro([{type:'condition',test:{type:'image_detect',image:'a',timeout_ms:10},then:[{type:'key',keys:'enter'}],else:[]}]));
+  await runner.active.done;assert.equal(inputs,0);assert.match(runner.state().error,/timeout/);
+});

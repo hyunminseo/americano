@@ -12,9 +12,11 @@
     "test": "node --test",
     "start": "electron .",
     "dev": "electron .",
-    "build": "electron-builder --win portable --x64",
-    "build:license-compare": "node scripts/build-license-comparison.cjs",
-    "license:init": "node scripts/license-issuer.cjs init"
+    "build:icon": "node scripts/build-icon.cjs",
+    "build": "npm run build:icon && electron-builder --win portable --x64",
+    "build:license-compare": "npm run build:icon && node scripts/build-license-comparison.cjs",
+    "license:init": "node scripts/license-issuer.cjs init",
+    "test:overlay-ui": "electron scripts/overlay-ui-smoke.cjs"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -22,6 +24,7 @@
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6",
+    "koffi": "^3.2.1",
     "screenshot-desktop": "^1.15.0",
     "sharp": "^0.34.3"
   },
@@ -32,6 +35,7 @@
     "files": [
       "electron/**/*",
       "src/macros.js",
+      "src/portable.js",
       "src/store.js",
       "src/runner.js",
       "src/license.js",
@@ -39,9 +43,21 @@
       "src/matcher.js",
       "src/windows.js",
       "src/input-adapter.js",
-      "src/uo-script/**/*"
+      "src/uo-script/**/*",
+      "src/overlay.js",
+      "src/native-windows.js"
     ],
-    "extraResources": [{ "from": "licensing/public-key.pem", "to": "licensing/public-key.pem" }],
+    "asarUnpack": [
+      "node_modules/screenshot-desktop/lib/win32/**/*",
+      "node_modules/koffi/**/*",
+      "node_modules/@koromix/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "licensing/public-key.pem",
+        "to": "licensing/public-key.pem"
+      }
+    ],
     "win": {
       "icon": "electron/assets/coffee.ico",
       "signExecutable": false,
