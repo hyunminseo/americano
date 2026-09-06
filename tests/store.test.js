@@ -51,3 +51,11 @@ test('captured images are encrypted, recover after restart, and reject tampering
   await assert.rejects(restored.readImage(file));
   await assert.rejects(restored.readImage(path.join(dir,'..','outside.aimg')));
 });
+test('unused images are deleted only inside the store directory', async t => {
+  const {dir,store}=await setup(t); const image=Buffer.from('temporary image');
+  const file=await store.saveImage(image);
+  await assert.rejects(store.deleteImage(path.join(dir,'..','outside.aimg')), /허용되지 않은 이미지/);
+  await store.deleteImage(file);
+  await assert.rejects(fs.access(file));
+  await store.deleteImage(file);
+});

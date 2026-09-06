@@ -64,6 +64,13 @@ class MacroStore {
     decipher.setAAD(Buffer.from('AI01')); decipher.setAuthTag(bytes.subarray(16, 32));
     return Buffer.concat([decipher.update(bytes.subarray(32)), decipher.final()]);
   }
+  deleteImage(file) {
+    const job = this.queue.then(async () => {
+      if (!this.ready || path.dirname(path.resolve(file)) !== path.resolve(this.directory) || !/^[a-f0-9-]+\.aimg$/.test(path.basename(file))) throw new Error('허용되지 않은 이미지입니다.');
+      await fs.unlink(file).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+    });
+    this.queue = job.catch(() => {}); return job;
+  }
   save(raw) {
     const document = validateDocument(raw);
     const job = this.queue.then(async () => {

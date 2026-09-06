@@ -205,6 +205,7 @@ else {
           }
           case 'overlay-rebind': return { ok: true, macro: rebindOverlay(payload.macro, payload.region), state: state() };
           case 'progress-toggle': {
+            if (payload.open === true && progressWindow && !progressWindow.isDestroyed()) return { ok: true, open: true, state: state() };
             if (progressWindow && !progressWindow.isDestroyed()) { closeProgress(); return { ok: true, open: false, state: state() }; }
             const found = store.snapshot().macros.find((item) => item.id === payload.macroId);
             if (!found) throw new Error('매크로를 찾을 수 없습니다.');
@@ -236,6 +237,10 @@ else {
           case 'image-select': {
             const selection = await dialog.showOpenDialog(mainWindow, { title: '감지할 이미지 선택', properties: ['openFile'], filters: [{ name: '이미지', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }] });
             return { ok: true, path: selection.canceled ? '' : selection.filePaths[0], state: state() };
+          }
+          case 'image-delete': {
+            if (!payload || typeof payload.path !== 'string') throw new Error('잘못된 요청입니다.');
+            await store.deleteImage(payload.path); break;
           }
           case 'window-list': return { ok: true, windows: (await listWindows()).map(({handle, ...info}) => info), state: state() };
           case 'overlay-hide': closeOutline(); break;
