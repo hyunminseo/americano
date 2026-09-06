@@ -29,3 +29,18 @@ test('stop while moving prevents mouse-down after the move settles', async () =>
   await assert.rejects(input.execute({ type: 'click', x: 30, y: 40 }, {}, control));
   assert.equal(events.length, 0);
 });
+test('click reports its screen point for visual feedback without affecting input', async () => {
+  const { events, input } = fixture();
+  const control = new RunControl(); const points = [];
+  control.onClickPoint = (point) => points.push(point);
+  await input.execute({ type: 'click', x: 30, y: 40 }, {}, control);
+  assert.deepEqual(points, [{ x: 130, y: 240 }]);
+  assert.deepEqual(events, [['move', { x: 130, y: 240 }], ['click', 'left']]);
+});
+test('move-only actions never report a click point', async () => {
+  const { input } = fixture();
+  const control = new RunControl(); let called = 0;
+  control.onClickPoint = () => { called++; };
+  await input.execute({ type: 'mouse_move', x: 5, y: 6 }, {}, control);
+  assert.equal(called, 0);
+});

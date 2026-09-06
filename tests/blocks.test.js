@@ -29,6 +29,20 @@ test('drag connections can move an action into false branch without losing its f
     assert.equal(paths.get('0.else.0'), key.id);
   } finally { workspace.dispose(); }
 });
+test('smart click roundtrips with its verify interval and expected image', () => {
+  const actions = normalize([{ type: 'smart_click', image: 'button.png', verify_interval_ms: 500, expect_image: 'next.png' }]);
+  assert.equal(actions[0].verify_interval_ms, 500);
+  Blocks.register(Blockly, () => [{ name: '버튼', path: 'button.png' }, { name: '다음', path: 'next.png' }]);
+  const workspace = new Blockly.Workspace();
+  try {
+    Blocks.load(Blockly, workspace, actions);
+    const roundtripped = normalize(Blocks.compile(workspace).actions);
+    assert.deepEqual(roundtripped, actions);
+    const plain = workspace.getAllBlocks(false).find((b) => b.type === 'am_smart_click');
+    plain.setFieldValue('', 'expect_image');
+    assert.equal(normalize(Blocks.compile(workspace).actions)[0].expect_image, undefined);
+  } finally { workspace.dispose(); }
+});
 test('missing and multiple test blocks reject rather than silently omit actions', () => {
   const workspace = new Blockly.Workspace();
   try {

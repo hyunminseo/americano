@@ -11,7 +11,7 @@ function renderer() {
       if (!elements.has(selector)) elements.set(selector, { innerHTML: '', querySelectorAll: () => [] });
       return elements.get(selector);
     } },
-    window: { americano: { request: () => new Promise(() => {}), onState: () => {} }, addEventListener: () => {} },
+    window: { americano: { request: () => new Promise(() => {}), onState: () => {}, onStartHotkey: () => {}, onCaptureResult: undefined }, addEventListener: () => {}, Blockly: undefined, MacroBlocks: undefined },
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../electron/renderer.js'), 'utf8'), context);
   return { context, elements };

@@ -72,6 +72,8 @@ function update(state) {
   $('#runtime-copy').textContent = `${run.macroId ? (documentData.macros.find((item) => item.id === run.macroId)?.name || run.macroId) : '실행 대기'}${run.step ? ` · 단계 ${run.step.map((part) => typeof part === 'number' ? part + 1 : ({test:'검사',then:'true',else:'false'}[part] || part)).join('.')}` : ''} · 반복 ${run.iteration || 0}/${run.iterations || 1} · 탐지 ${run.matched == null ? '대기' : run.matched} · 완료 ${run.completed}회`;
   $('#pause-button').disabled = !['RUNNING', 'PAUSED'].includes(run.status);
   $('#pause-button').textContent = run.status === 'PAUSED' ? 'F8 재개' : 'F8 일시정지';
+  $('#start-button').disabled = !selectedId || ['RUNNING', 'PAUSED'].includes(run.status);
+  $('#start-button').title = backend?.f7Ready === false ? 'F7 등록에 실패했습니다. 버튼으로 시작하세요.' : 'F7';
   $('#stop-button').disabled = !['RUNNING', 'PAUSED'].includes(run.status);
   $('#availability').textContent = state.error || `${state.executionReason} 입력 실행은 대상 창 제목 조건과 권한이 준비된 매크로에서 사용할 수 있습니다.`;
   $('#new-button').disabled = !state.storageReady || saving;
@@ -86,22 +88,22 @@ function renderList() {
   $('#macros').querySelectorAll('button').forEach((button) => { button.onclick = () => { if (!validFields()) return; selectedId = button.dataset.id; render(); }; });
 }
 function defaults(type) {
-  const image = { type, image: '', monitor: 1, threshold: 0.9, poll_interval_ms: 100, region: { x: 0, y: 0, width: 1920, height: 1080 } };
-  return { wait: { type, duration_ms: 1000 }, image_detect: structuredClone(image), image_wait: structuredClone(image), image_click: structuredClone(image), scroll: { type, delta_x: 0, delta_y: -500 }, retry: { type, count: 2, interval_ms: 200, action: structuredClone({ ...image, type: 'image_detect' }) }, condition: { type, test: structuredClone({ ...image, type: 'image_detect' }), then: [{ type: 'wait', duration_ms: 500 }], else: [] }, key: { type, keys: 'enter' }, text: { type, text: '' }, mouse_move: { type, x: 0, y: 0 }, click: { type, x: 0, y: 0, button: 'left' }, repeat: { type, count: 2, actions: [{ type: 'wait', duration_ms: 500 }] }, stop: { type } }[type];
+  const image = { type, image: '', zone: 0, monitor: 1, threshold: 0.9, poll_interval_ms: 100, region: { x: 0, y: 0, width: 1920, height: 1080 } };
+  return { wait: { type, duration_ms: 1000 }, image_detect: structuredClone(image), image_wait: structuredClone(image), image_click: structuredClone(image), smart_click: { ...structuredClone(image), verify_interval_ms: 800, expect_image: '' }, scroll: { type, delta_x: 0, delta_y: -500 }, retry: { type, count: 2, interval_ms: 200, action: structuredClone({ ...image, type: 'image_detect' }) }, condition: { type, test: structuredClone({ ...image, type: 'image_detect' }), then: [{ type: 'wait', duration_ms: 500 }], else: [] }, key: { type, keys: 'enter' }, text: { type, text: '' }, mouse_move: { type, x: 0, y: 0 }, click: { type, x: 0, y: 0, button: 'left' }, repeat: { type, count: 2, actions: [{ type: 'wait', duration_ms: 500 }] }, stop: { type } }[type];
 }
 function fields(action) {
-  const labels = { duration_ms: '대기 시간 (ms)', image: '찾을 이미지 경로', monitor: '모니터 번호', threshold: '일치율 (0~1)', poll_interval_ms: '검색 간격 (ms)', delta_x: '가로 스크롤', delta_y: '세로 스크롤', x: '가로 위치', y: '세로 위치', width: '캡처 너비', height: '캡처 높이', keys: '키 조합', text: '입력할 내용', count: '반복 횟수', interval_ms: '재시도 간격 (ms)' };
+  const labels = { duration_ms: '대기 시간 (ms)', image: '찾을 이미지 경로', expect_image: '기대 화면 경로(선택)', verify_interval_ms: '클릭 후 확인 간격 (ms)', zone: '구역 (0=전체)', monitor: '모니터 번호', threshold: '일치율 (0~1)', poll_interval_ms: '검색 간격 (ms)', delta_x: '가로 스크롤', delta_y: '세로 스크롤', x: '가로 위치', y: '세로 위치', width: '캡처 너비', height: '캡처 높이', keys: '키 조합', text: '입력할 내용', count: '반복 횟수', interval_ms: '재시도 간격 (ms)' };
   return Object.entries(action).filter(([key]) => !['type', 'timeout_ms', 'actions', 'action', 'test', 'then', 'else'].includes(key)).map(([key, value]) => {
-    if (['image_detect', 'image_wait', 'image_click'].includes(action.type) && key === 'image') return `<label class="image-field">${escapeHtml(labels[key])}<span class="input-with-button"><input data-field="image" type="text" value="${escapeHtml(value)}" placeholder="캡처 자산을 선택하세요"><button type="button" data-op="select-image" aria-label="이미지 파일 선택">파일</button></span><span class="asset-quick-pick">${(current()?.images || []).map((asset) => `<button type="button" data-asset-path="${escapeHtml(asset.path)}" title="${escapeHtml(asset.name)}">${escapeHtml(asset.name)}</button>`).join('') || '<small>아래 캡처 보관함에서 기준 이미지를 먼저 만드세요.</small>'}</span></label>`;
+    if (['image_detect', 'image_wait', 'image_click', 'smart_click'].includes(action.type) && key === 'image') return `<label class="image-field">${escapeHtml(labels[key])}<span class="input-with-button"><input data-field="image" type="text" value="${escapeHtml(value)}" placeholder="캡처 자산을 선택하세요"><button type="button" data-op="select-image" aria-label="이미지 파일 선택">파일</button></span><span class="asset-quick-pick">${(current()?.images || []).map((asset) => `<button type="button" data-asset-path="${escapeHtml(asset.path)}" title="${escapeHtml(asset.name)}">${escapeHtml(asset.name)}</button>`).join('') || '<small>아래 캡처 보관함에서 기준 이미지를 먼저 만드세요.</small>'}</span></label>`;
     if (current()?.overlay && ['monitor', 'region'].includes(key)) return '';
-    if (['image_detect', 'image_wait', 'image_click'].includes(action.type) && key === 'region') return Object.entries(value).map(([regionKey, regionValue]) => `<label>${escapeHtml(labels[regionKey])}<input data-field="region.${regionKey}" type="number" value="${escapeHtml(regionValue)}" min="0" step="1"></label>`).join('');
+    if (['image_detect', 'image_wait', 'image_click', 'smart_click'].includes(action.type) && key === 'region') return Object.entries(value).map(([regionKey, regionValue]) => `<label>${escapeHtml(labels[regionKey])}<input data-field="region.${regionKey}" type="number" value="${escapeHtml(regionValue)}" min="0" step="1"></label>`).join('');
     if (key === 'button') return `<label>버튼<select data-field="button">${['left', 'right', 'middle'].map((option) => `<option ${value === option ? 'selected' : ''}>${option}</option>`).join('')}</select></label>`;
     if (key === 'coordinate_space') return `<label>좌표 기준<select data-field="coordinate_space"><option value="client" ${value === 'client' ? 'selected' : ''}>창 영역</option><option value="overlay" ${value === 'overlay' ? 'selected' : ''}>오버레이 영역</option></select></label>`;
     return `<label>${escapeHtml(labels[key] || key)}<input data-field="${key}" type="${typeof value === 'number' ? 'number' : 'text'}" value="${escapeHtml(value)}" ${typeof value === 'number' ? (key === 'threshold' ? 'min="0" max="1" step="0.01"' : 'min="0" step="1"') : ''}></label>`;
   }).join('');
 }
 
-const typeLabels = { wait: '대기', image_detect: '이미지 확인', image_wait: '이미지 발견 대기', image_click: '이미지 클릭', scroll: '스크롤', retry: '재시도', condition: '조건 분기', key: '키 입력', text: '문자 입력', mouse_move: '마우스 이동', click: '클릭', repeat: '반복', stop: '중단' };
+const typeLabels = { wait: '대기', image_detect: '이미지 확인', image_wait: '이미지 발견 대기', image_click: '이미지 클릭', smart_click: '스마트 클릭', scroll: '스크롤', retry: '재시도', condition: '조건 분기', key: '키 입력', text: '문자 입력', mouse_move: '마우스 이동', click: '클릭', repeat: '반복', stop: '중단' };
 function typeOptions() { return Object.entries(typeLabels).map(([type, label]) => '<option value="' + type + '">' + label + '</option>').join(''); }
 function stepCards(items, prefix = []) {
   if (!items.length) return '<p class="empty">단계를 추가해 실행 순서를 구성하세요.</p>';
@@ -158,7 +160,7 @@ async function selectImage(action) {
 function captureStudio(macro) {
   const area = macro.overlay;
   const assets = macro.images || [];
-  return '<section class="capture-studio"><h3>캔버스 오버레이</h3><p>대상 창의 영역을 지정한 뒤, 그 안에서 기준 이미지를 드래그하여 저장하세요.</p><p>' + (area ? '저장 영역: ' + area.x + ', ' + area.y + ' / ' + area.width + ' × ' + area.height : '오버레이가 아직 없습니다.') + '</p><div class="editor-actions"><button class="button ghost" id="capture-open">오버레이 영역 설정</button><button class="button ghost" id="overlay-show">저장 오버레이 표시</button><button class="button ghost" id="overlay-hide">오버레이 숨기기</button><button class="button ghost" id="capture-image" ' + (!area ? 'disabled' : '') + '>영역 안에서 이미지 캡처</button></div><div class="asset-list">' + assets.map(asset => '<button class="asset-card" data-asset-id="' + escapeHtml(asset.id) + '"><img width="64" src="' + escapeHtml(asset.preview) + '" alt=""><span>' + escapeHtml(asset.name) + (captureState.activeAsset === asset.id ? ' ✓' : '') + '</span></button>').join('') + '</div><div class="form-grid"><label>탐지 일치율<input id="rule-threshold" type="number" min="0" max="1" step="0.01" value="0.9"></label><label>탐지 true일 때<select id="rule-type"><option value="key">키 입력</option><option value="click">지정 좌표 클릭</option><option value="text">문자 입력</option><option value="stop">반복 중지</option></select></label></div><button class="button primary" id="add-rule" ' + (!area || !assets.length ? 'disabled' : '') + '>선택 이미지 조건 추가</button><p>조건을 추가한 뒤 아래 true / false 단계에서 실행 내용을 편집하세요.</p><div class="form-grid"><label>전체 반복 횟수 (1~10000)<input id="loop-count" type="number" min="1" max="10000" value="' + (macro.loop?.count || 1) + '"></label><label>반복 간격 (ms)<input id="loop-interval" type="number" min="30" max="60000" value="' + (macro.loop?.interval_ms || 500) + '"></label></div></section>';
+  return '<section class="capture-studio"><h3>캔버스 오버레이</h3><p>대상 창의 영역을 지정한 뒤, 그 안에서 기준 이미지를 드래그하여 저장하세요.</p><p>' + (area ? '저장 영역: ' + area.x + ', ' + area.y + ' / ' + area.width + ' × ' + area.height : '오버레이가 아직 없습니다.') + '</p><div class="editor-actions"><button class="button ghost" id="capture-open">오버레이 영역 설정</button><button class="button ghost" id="overlay-auto">전체 창 자동 설정</button><button class="button ghost" id="overlay-show">저장 오버레이 표시</button><button class="button ghost" id="overlay-hide">오버레이 숨기기</button><button class="button ghost" id="capture-image" ' + (!area ? 'disabled' : '') + '>영역 안에서 이미지 캡처</button></div><div class="asset-list">' + assets.map(asset => '<button class="asset-card" data-asset-id="' + escapeHtml(asset.id) + '"><img width="64" src="' + escapeHtml(asset.preview) + '" alt=""><span>' + escapeHtml(asset.name) + (captureState.activeAsset === asset.id ? ' ✓' : '') + '</span></button>').join('') + '</div><div class="form-grid"><label>탐지 일치율<input id="rule-threshold" type="number" min="0" max="1" step="0.01" value="0.9"></label><label>탐지 true일 때<select id="rule-type"><option value="key">키 입력</option><option value="click">지정 좌표 클릭</option><option value="text">문자 입력</option><option value="stop">반복 중지</option></select></label></div><button class="button primary" id="add-rule" ' + (!area || !assets.length ? 'disabled' : '') + '>선택 이미지 조건 추가</button><p>조건을 추가한 뒤 아래 true / false 단계에서 실행 내용을 편집하세요.</p><div class="form-grid"><label>전체 반복 횟수 (1~10000)<input id="loop-count" type="number" min="1" max="10000" value="' + (macro.loop?.count || 1) + '"></label><label>반복 간격 (ms)<input id="loop-interval" type="number" min="30" max="60000" value="' + (macro.loop?.interval_ms || 500) + '"></label></div></section>';
 }
 function bindCapture(macro) {
   const open = async (mode) => {
@@ -172,6 +174,14 @@ function bindCapture(macro) {
   $('#overlay-show').onclick = async () => { if (dirty && !(await save())) return; await request('overlay-show', {macroId: selectedId}); };
   $('#overlay-hide').onclick = () => request('overlay-hide');
   $('#capture-open').onclick = () => open('region');
+  $('#overlay-auto').onclick = async () => {
+    if (!validFields()) return;
+    try {
+      const result = await window.americano.request('overlay-auto', { macro });
+      if (!result.ok) { log(result.error); return; }
+      Object.assign(macro, result.macro); changed(); render(); await save();
+    } catch (error) { log(error.message); }
+  };
   $('#capture-image').onclick = () => open('image');
   document.querySelectorAll('[data-asset-id]').forEach(button => { button.onclick = () => { if (!validFields()) return; captureState.activeAsset = button.dataset.assetId; render(); }; });
   $('#add-rule').onclick = () => {
@@ -207,7 +217,7 @@ function render() {
     <div class="section-heading"><h3>블록으로 코딩하기</h3><button id="editor-mode">${editorMode === 'blocks' ? '상세 목록으로 보기' : '블록으로 보기'}</button></div><p>왼쪽 블록을 끌어 시작 블록 안에 연결하세요. 조건의 참·거짓과 반복 안에 동작을 넣을 수 있습니다.</p>
     <div id="block-workspace" ${editorMode !== 'blocks' ? 'hidden' : ''}></div>
     <div id="steps" ${editorMode === 'blocks' ? 'hidden' : ''}>${stepCards(macro.actions)}</div>
-    <div class="editor-actions"><select id="action-type" aria-label="추가할 단계 유형">${typeOptions()}</select><button id="add">단계 추가</button><button id="save" class="button primary">저장</button><button id="run" class="button danger">실행</button><button id="preview" class="button ghost">입력 없이 미리보기</button></div>`;
+    <div class="editor-actions"><select id="action-type" aria-label="추가할 단계 유형">${typeOptions()}</select><button id="add">단계 추가</button><button id="save" class="button primary">저장</button><button id="run" class="button danger">실행</button><button id="preview" class="button ghost">입력 없이 미리보기</button><button id="progress-toggle" class="button ghost">진행 오버레이</button></div>`;
   for (const [id, field] of [['name', 'name'], ['description', 'description'], ['hotkey', 'hotkey']]) $(`#${id}`).oninput = (event) => { macro[field] = event.target.value; changed(); renderList(); };
   $('#script').oninput = (event) => { macro.script = event.target.value; changed(); };
   $('#process').oninput = (event) => { macro.target_window.process_name = event.target.value; changed(); };
@@ -229,6 +239,13 @@ function render() {
   if ($('#binding-reviewed')) $('#binding-reviewed').onclick = () => { macro.binding.needs_review = false; changed(); render(); };
   $('#run').onclick = async () => { if (dirty && !(await save())) return; await request('start', { macroId: selectedId, startIndex: 0 }); };
   $('#preview').onclick = () => preview(0);
+  $('#progress-toggle').onclick = async () => {
+    try {
+      const result = await window.americano.request('progress-toggle', { macroId: selectedId });
+      if (result.state) update(result.state);
+      log(result.ok ? (result.open ? '진행 오버레이를 열었습니다.' : '진행 오버레이를 닫았습니다.') : result.error);
+    } catch (error) { log(error.message); }
+  };
   bindSteps(macro);
   mountBlocks(macro);
   if (backend) update(backend);
@@ -260,6 +277,11 @@ async function save() {
   documentData = state.document; dirty = false; render(); log('암호화 저장했습니다.'); return true;
 }
 async function preview(startIndex) { if (dirty && !(await save())) return; await request('preview', { macroId: selectedId, startIndex }); }
+async function startSelected() {
+  if (!selectedId) { log('시작할 매크로를 선택하세요.'); return; }
+  if (dirty && !(await save())) return;
+  await request('start', { macroId: selectedId, startIndex: 0 });
+}
 function createMacro() {
   if (saving || !backend?.storageReady || !validFields()) return;
   const macro = { id: crypto.randomUUID(), name: '새 매크로', description: '', script: '', enabled: false, hotkey: '', target_window: {}, images: [], actions: [] };
@@ -281,8 +303,10 @@ importButton.onclick = async () => {
   finally { importButton.disabled = false; $('#editor').inert = false; }
 };
 $('#macro-search').oninput = (event) => { macroFilter = event.target.value.trim(); renderList(); };
+$('#start-button').onclick = startSelected;
 $('#pause-button').onclick = () => request('pause');
 $('#stop-button').onclick = () => request('stop');
+window.americano.onStartHotkey(startSelected);
 $('#license-import').onclick = () => request('license-import');
 $('#license-check').onclick = async () => { const state = await request('license-check'); if (state) log('실행 권한 확인 성공: 서명, MAC, 유효기간, 기능 권한이 모두 유효합니다. 실제 입력은 수행하지 않았습니다.'); };
 $('#license-device-button').onclick = async () => {

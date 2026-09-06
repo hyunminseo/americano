@@ -25,8 +25,8 @@ class RunControl {
   }
 }
 class MacroRunner {
-  constructor({ input, imageMatcher, authorize = async () => { throw new Error('실제 실행은 창·권한·라이선스 연결 후 사용할 수 있습니다.'); }, onState = () => {} } = {}) {
-    this.input = input; this.imageMatcher = imageMatcher; this.authorize = authorize; this.onState = onState;
+  constructor({ input, imageMatcher, authorize = async () => { throw new Error('실제 실행은 창·권한·라이선스 연결 후 사용할 수 있습니다.'); }, onState = () => {}, onClickPoint = null } = {}) {
+    this.input = input; this.imageMatcher = imageMatcher; this.authorize = authorize; this.onState = onState; this.onClickPoint = onClickPoint;
     this.current = { status: 'STOPPED', runId: null, macroId: null, step: null, preview: false, completed: 0, error: null, outcome: null };
     this.active = null;
   }
@@ -38,6 +38,7 @@ class MacroRunner {
     if (!preview) assertRunnable(macro);
     if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex >= macro.actions.length) throw new Error('실행할 단계가 없습니다.');
     const control = new RunControl();
+    if (this.onClickPoint) control.onClickPoint = this.onClickPoint;
     const active = { control, done: null, macro }; this.active = active;
     this.publish({ status: 'RUNNING', runId: randomUUID(), macroId: macro.id, step: null, preview, error: null, outcome: null, matched: null, iteration: 0, iterations: macro.loop.count });
     active.done = Promise.resolve().then(async () => {
@@ -79,9 +80,48 @@ class MacroRunner {
       else if (action.type === 'image_click') {
         if (preview) await control.tick(0);
         else {
-          const match = await this.waitForImage({ ...action, timeout_ms: Math.min(action.timeout_ms, 1000) }, control);
+          const match = await this.waitForImage(action, control);
           if (!match) throw new Error(`클릭할 이미지를 찾지 못했습니다: ${action.image}`);
           await this.executeInput({ type: 'click', button: action.button ?? 'left', x: (macro.overlay || action.region).x + match.x + Math.floor(match.width / 2), y: (macro.overlay || action.region).y + match.y + Math.floor(match.height / 2), timeout_ms: action.timeout_ms }, control, macro);
+        }
+      }
+      else if (action.type === 'smart_click') {
+        if (preview) await control.tick(0);
+        else {
+          // 탐지된 범위 안에서 가운데→위→아래 순서로 눌러보고,
+          // 화면이 변하면(또는 기대 화면이 나타나면) 성공으로 확정한다.
+          const origin = macro.overlay || action.region;
+          const threshold = action.threshold ?? 0.9;
+          const interval = action.verify_interval_ms ?? 800;
+          const deadline = control.time() + action.timeout_ms;
+          const changed = async () => {
+            if (action.expect_image) {
+              return Boolean(await this.imageMatcher({ ...action, image: action.expect_image }, control, macro));
+            }
+            const again = await this.imageMatcher(action, control, macro);
+            return !again || again.score < threshold * 0.9;
+          };
+          let lastError = new Error(`클릭할 이미지를 찾지 못했습니다: ${action.image}`);
+          for (;;) {
+            const match = await this.imageMatcher(action, control, macro);
+            let done = false;
+            if (match) {
+              const spots = [
+                { x: match.x + Math.floor(match.width / 2), y: match.y + Math.floor(match.height / 2) },
+                { x: match.x + Math.floor(match.width / 2), y: match.y + Math.max(0, Math.floor(match.height * 0.25)) },
+                { x: match.x + Math.floor(match.width / 2), y: match.y + Math.floor(match.height * 0.75) },
+              ];
+              for (const spot of spots) {
+                await this.executeInput({ type: 'click', button: action.button ?? 'left', x: origin.x + spot.x, y: origin.y + spot.y, timeout_ms: action.timeout_ms }, control, macro);
+                await control.wait(interval);
+                if (await changed()) { done = true; break; }
+              }
+              if (!done) lastError = new Error(`클릭 후 화면이 변하지 않았습니다: ${action.image}`);
+            }
+            if (done) { this.publish({ matched: true }); break; }
+            if (control.time() >= deadline) throw lastError;
+            await control.wait(Math.min(action.poll_interval_ms, Math.max(0, deadline - control.time())));
+          }
         }
       }
       else if (action.type === 'retry') {

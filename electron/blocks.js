@@ -11,13 +11,19 @@
     mouse_move: ['마우스 이동', 210, { coordinate_space: ['기준', [['오버레이', 'overlay'], ['창 영역', 'client']]], x: ['X', 0, 0, 100000], y: ['Y', 0, 0, 100000] }],
     scroll: ['스크롤', 210, { delta_x: ['가로', 0, -100000, 100000], delta_y: ['세로', -500, -100000, 100000] }],
     image_detect: ['이미지 검사', 150, {}], image_wait: ['이미지 발견까지 기다리기', 150, {}], image_click: ['발견한 이미지 클릭', 150, {}],
+    smart_click: ['클릭 후 화면 변화 확인', 150, { verify_interval_ms: ['확인 간격 ms', 800, 100, 10000] }],
     condition: ['이미지가 발견되면', 285, {}],
     repeat: ['반복', 45, { count: ['횟수', 2, 1, 10000] }],
     retry: ['이미지 재시도', 45, { count: ['추가 횟수', 2, 0, 10], interval_ms: ['간격 ms', 200, 0, 60000] }],
     stop: ['매크로 중지', 0, {}],
   };
-  const imageFields = { image: ['기준 이미지', ''], threshold: ['일치율', 0.9, 0, 1, 0.01], poll_interval_ms: ['검사 간격 ms', 100, 30, 60000], monitor: ['모니터', 1, 1, 16], 'region.x': ['영역 X', 0, 0, 100000], 'region.y': ['영역 Y', 0, 0, 100000], 'region.width': ['너비', 1920, 1, 100000], 'region.height': ['높이', 1080, 1, 100000] };
-  function specs(type) { return { ...definitions[type][2], ...(type.startsWith('image_') ? imageFields : {}), timeout_ms: ['제한 시간 ms', 10000, 1, 3600000] }; }
+  const imageFields = { image: ['기준 이미지', ''], threshold: ['일치율', 0.9, 0, 1, 0.01], zone: ['구역(0=전체)', 0, 0, 9], poll_interval_ms: ['검사 간격 ms', 100, 30, 60000], monitor: ['모니터', 1, 1, 16], 'region.x': ['영역 X', 0, 0, 100000], 'region.y': ['영역 Y', 0, 0, 100000], 'region.width': ['너비', 1920, 1, 100000], 'region.height': ['높이', 1080, 1, 100000] };
+  function specs(type) {
+    const imageLike = type.startsWith('image_') || type === 'smart_click';
+    const fields = { ...definitions[type][2], ...(imageLike ? imageFields : {}), timeout_ms: ['제한 시간 ms', 10000, 1, 3600000] };
+    if (type === 'smart_click') fields.expect_image = ['기대 화면(선택)', ''];
+    return fields;
+  }
   function register(Blockly, getImages = () => [], getOverlay = () => null) {
     Blockly.Blocks.am_start = { init() { this.appendDummyInput().appendField('▶ 실행 버튼을 눌렀을 때'); this.appendStatementInput('BODY'); this.setColour(45); this.setDeletable(false); this.setMovable(false); } };
     for (const [type, [label, color]] of Object.entries(definitions)) {
@@ -25,10 +31,10 @@
         this.appendDummyInput('TITLE').appendField(label);
         for (const [key, [name, value, min, max, precision]] of Object.entries(specs(type))) {
           let field;
-          if (key === 'image') {
+          if (key === 'image' || key === 'expect_image') {
             field = new Blockly.FieldDropdown(() => {
               const choices = getImages().map(asset => [asset.name, asset.path]);
-              const existing = this.getFieldValue('image');
+              const existing = this.getFieldValue(key);
               if (existing && !choices.some(([, path]) => path === existing)) choices.push(['기존 이미지', existing]);
               return [['이미지 선택', ''], ...choices];
             });
@@ -93,7 +99,7 @@
         if (type === 'repeat') action.actions = chain(block.getInputTargetBlock('BODY'), path, depth + 1);
         if (type === 'retry') {
           const children = chain(block.getInputTargetBlock('ACTION'), path, depth + 1);
-          if (children.length !== 1 || !children[0].type.startsWith('image_')) throw new Error('재시도 안에는 이미지 동작 하나를 연결하세요.');
+          if (children.length !== 1 || !(children[0].type.startsWith('image_') || children[0].type === 'smart_click')) throw new Error('재시도 안에는 이미지 동작 하나를 연결하세요.');
           action.action = children[0];
         }
         if (type === 'condition') {
@@ -112,7 +118,7 @@
   function toolbox() {
     return { kind: 'categoryToolbox', contents: [
       ['입력', 210, ['key', 'text', 'click', 'mouse_move', 'scroll']],
-      ['이미지 탐지', 150, ['image_detect', 'image_wait', 'image_click']],
+      ['이미지 탐지', 150, ['image_detect', 'image_wait', 'image_click', 'smart_click']],
       ['조건과 반복', 45, ['condition', 'repeat', 'retry', 'wait', 'stop']],
     ].map(([name, colour, types]) => ({ kind: 'category', name, colour, contents: types.map(type => ({ kind: 'block', type: `am_${type}` })) })) };
   }

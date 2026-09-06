@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { validateDocument, newMacro } = require('../src/macros');
 const { matchesTarget, screenPoint } = require('../src/windows');
-const { physicalRegion } = require('../src/overlay');
+const { physicalRegion, fullClientOverlay } = require('../src/overlay');
 const { findTemplate } = require('../src/matcher');
 const { RunControl } = require('../src/runner');
 
@@ -24,6 +24,11 @@ test('target conditions all match, and DPI coordinates track moved windows', () 
   assert.deepEqual(physicalRegion(client, {x: 20, y: 30, width: 100, height: 50}), {x: -970, y: 145, width: 150, height: 75});
   assert.deepEqual(screenPoint(client, 20, 30), {x: -970, y: 145});
   assert.throws(() => physicalRegion(client, {x: 399, y: 0, width: 20, height: 20}), /벗어/);
+});
+test('full client overlay derives DIP region from native resolution', () => {
+  assert.deepEqual(fullClientOverlay({ width: 1280, height: 960, dpi: 96 }), { x: 0, y: 0, width: 1280, height: 960 });
+  assert.deepEqual(fullClientOverlay({ width: 1920, height: 1080, dpi: 144 }), { x: 0, y: 0, width: 1280, height: 720 });
+  assert.deepEqual(fullClientOverlay({ width: 0, height: 0 }), { x: 0, y: 0, width: 1, height: 1 });
 });
 test('matching returns location and yields so cancellation can interrupt scanning', async () => {
   const frame = {data: Buffer.from([0,0,0,0,0,1,2,0,0,3,4,0,0,0,0,0]), info: {width:4,height:4}};

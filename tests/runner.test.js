@@ -75,6 +75,15 @@ test('supports image detection, retry, condition, and image click coordinates', 
   assert.deepEqual(inputs[0], { type: 'click', button: 'left', x: 125, y: 240, timeout_ms: 10000 });
 });
 
+test('click point hook is attached to the run control when provided', async () => {
+  let seen = null;
+  const runner = new MacroRunner({ authorize: async () => {}, onClickPoint: (point) => { seen = point; }, input: {
+    execute: async (_action, _target, control) => { control.onClickPoint?.({ x: 1, y: 2 }); }, releaseAll: async () => {},
+  } });
+  runner.start(macro([{ type: 'key', keys: 'enter' }])); await runner.active.done;
+  assert.equal(runner.state().outcome, 'completed');
+  assert.deepEqual(seen, { x: 1, y: 2 });
+});
 test('condition selects only the matching branch', async () => {
   const inputs = [];
   const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => null, input: {
@@ -104,6 +113,43 @@ test('stop cancels the interval before another loop can run', async () => {
 test('image scan timeout prevents a matching branch from running', async () => {
   let inputs=0;
   const runner=new MacroRunner({authorize:async()=>{},imageMatcher:async(_action,control)=>{while(true){await sleep(2);await control.checkpoint();}},input:{execute:async()=>{inputs++;},releaseAll:async()=>{}}});
-  runner.start(macro([{type:'condition',test:{type:'image_detect',image:'a',timeout_ms:10},then:[{type:'key',keys:'enter'}],else:[]}]));
+  runner.start(macro([{type:'condition',test:{type:'image_detect',image:'a',timeout_ms:10},then:[{type:'key',keys:'enter'}],else:[]}]))
   await runner.active.done;assert.equal(inputs,0);assert.match(runner.state().error,/timeout/);
+});
+test('smart click verifies screen change after the center click', async () => {
+  const inputs = []; let calls = 0;
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => (calls++ === 0 ? { x: 10, y: 20, width: 30, height: 40 } : null), input: {
+    execute: async (action) => { inputs.push(action); }, releaseAll: async () => {},
+  } });
+  runner.start(macro([{ type: 'smart_click', image: 'ok.png', region: { x: 100, y: 200, width: 200, height: 200 }, verify_interval_ms: 100 }]));
+  await runner.active.done;
+  assert.equal(runner.state().outcome, 'completed');
+  assert.deepEqual(inputs.map((a) => [a.x, a.y]), [[125, 240]]);
+  assert.equal(calls, 2);
+});
+test('smart click falls back to upper and lower points while the screen persists', async () => {
+  const inputs = []; let calls = 0;
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => (++calls <= 3 ? { x: 0, y: 0, width: 100, height: 100 } : null), input: {
+    execute: async (action) => { inputs.push(action); }, releaseAll: async () => {},
+  } });
+  runner.start(macro([{ type: 'smart_click', image: 'ok.png', region: { x: 0, y: 0, width: 200, height: 200 }, verify_interval_ms: 100 }]));
+  await runner.active.done;
+  assert.equal(runner.state().outcome, 'completed');
+  assert.deepEqual(inputs.map((a) => [a.x, a.y]), [[50, 50], [50, 25], [50, 75]]);
+});
+test('smart click accepts an expected image appearing instead of disappearance', async () => {
+  const inputs = [];
+  const seen = [];
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async (action) => {
+    seen.push(action.image);
+    if (action.image === 'ok.png') return { x: 0, y: 0, width: 20, height: 20 };
+    return seen.filter((image) => image === 'next.png').length >= 1 ? { x: 5, y: 5, width: 10, height: 10 } : null;
+  }, input: {
+    execute: async (action) => { inputs.push(action); }, releaseAll: async () => {},
+  } });
+  runner.start(macro([{ type: 'smart_click', image: 'ok.png', expect_image: 'next.png', region: { x: 0, y: 0, width: 200, height: 200 }, verify_interval_ms: 100 }]));
+  await runner.active.done;
+  assert.equal(runner.state().outcome, 'completed');
+  assert.equal(inputs.length, 1);
+  assert.deepEqual([inputs[0].x, inputs[0].y], [10, 10]);
 });

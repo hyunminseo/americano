@@ -78,6 +78,23 @@ test('failed document commit rolls back newly encrypted images', async t => {
   await assert.rejects(importMacro(await exportMacro(macro, source), destination), /disk full/);
   assert.deepEqual(await fs.readdir(destination.directory), before);
 });
+test('smart click assets including expected image remap across export and import', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'americano-portable-smart-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const source = new MacroStore(path.join(dir, 'source'), protector); await source.open();
+  const destination = new MacroStore(path.join(dir, 'destination'), protector); await destination.open();
+  const image = await sharp({ create: { width: 12, height: 8, channels: 3, background: '#ab6731' } }).png().toBuffer();
+  const fileA = await source.saveImage(image);
+  const fileB = await source.saveImage(image);
+  const macro = { ...newMacro(), overlay: { x: 0, y: 0, width: 400, height: 300 },
+    actions: [{ type: 'smart_click', image: fileA, expect_image: fileB, region: { x: 0, y: 0, width: 400, height: 300 } }] };
+  const id = await importMacro(await exportMacro(macro, source), destination);
+  const step = destination.snapshot().macros.find((item) => item.id === id).actions[0];
+  assert.equal(step.type, 'smart_click');
+  assert.notEqual(step.image, fileA); assert.notEqual(step.expect_image, fileB);
+  assert.deepEqual(await destination.readImage(step.image), image);
+  assert.deepEqual(await destination.readImage(step.expect_image), image);
+});
 test('legacy client coordinates remain unchanged in schema and execution', async () => {
   const raw = { ...newMacro(), actions: [{ type: 'click', x: 50, y: 60 }] };
   const macro = validateDocument({ version: 2, macros: [raw] }).macros[0];

@@ -46,6 +46,7 @@
       "src/license.js",
       "src/capture.js",
       "src/matcher.js",
+      "src/detect.js",
       "src/windows.js",
       "src/input-adapter.js",
       "src/uo-script/**/*",
