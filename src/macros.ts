@@ -221,8 +221,8 @@ function actions(items: unknown, depth = 0, budget: Budget = { count: 0 }): Macr
       case 'scroll': return { ...base, delta_x: integer(item.delta_x ?? 0, 'delta_x', -100000, 100000), delta_y: integer(item.delta_y ?? 0, 'delta_y', -100000, 100000) };
       case 'retry': {
         const nested = actions([item.action], depth + 1, budget)[0];
-        if (!['image_detect', 'image_wait', 'image_click', 'smart_click'].includes(nested.type)) fail('retry는 이미지 액션 하나만 감쌀 수 있습니다.');
-        return { ...base, count: integer(item.count ?? 0, 'retry.count', 0, 10), interval_ms: integer(item.interval_ms ?? 200, 'retry.interval_ms', 0, 60000), action: nested };
+        if (!['image_detect', 'image_wait', 'image_click', 'smart_click', 'condition'].includes(nested.type)) fail('retry는 이미지 액션이나 조건 분기 하나만 감쌀 수 있습니다.');
+        return { ...base, count: integer(item.count ?? 0, 'retry.count', 0, 10000), interval_ms: integer(item.interval_ms ?? 200, 'retry.interval_ms', 0, 60000), action: nested };
       }
       case 'condition': {
         const test = actions([item.test], depth + 1, budget)[0];

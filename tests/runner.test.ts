@@ -85,6 +85,32 @@ test('click point hook is attached to the run control when provided', async () =
   assert.equal(runner.state().outcome, 'completed');
   assert.deepEqual(seen, { x: 1, y: 2 });
 });
+test('retry around a condition loops back to discovery on the false branch', async () => {
+  let scans = 0; const inputs: any[] = [];
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => (++scans >= 3 ? { x: 0, y: 0, width: 10, height: 10, score: 1 } : null), input: {
+    execute: async (action: any) => { inputs.push(action.type); }, releaseAll: async () => {},
+  } });
+  const region = { x: 0, y: 0, width: 100, height: 100 };
+  runner.start(macro([{ type: 'retry', count: 10, interval_ms: 0, action: { type: 'condition', test: { type: 'image_detect', image: 'wait.png', region }, then: [{ type: 'key', keys: 'space' }], else: [] } }]));
+  await runner.active!.done;
+  assert.equal(runner.state().outcome, 'completed');
+  assert.equal(scans, 3); assert.deepEqual(inputs, ['key']);
+});
+test('retry around a condition fails after the count is exhausted', async () => {
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => null, input: { execute: async () => {}, releaseAll: async () => {} } });
+  const region = { x: 0, y: 0, width: 100, height: 100 };
+  runner.start(macro([{ type: 'retry', count: 2, interval_ms: 0, action: { type: 'condition', test: { type: 'image_detect', image: 'missing.png', region }, then: [], else: [] } }]));
+  await runner.active!.done;
+  assert.equal(runner.state().status, 'ERROR'); assert.match(runner.state().error as string, /다시 확인/);
+});
+test('retry around a condition runs once in preview', async () => {
+  let scans = 0;
+  const runner = new MacroRunner({ imageMatcher: async () => { scans++; return null; } });
+  const region = { x: 0, y: 0, width: 100, height: 100 };
+  runner.start(macro([{ type: 'retry', count: 10000, interval_ms: 0, action: { type: 'condition', test: { type: 'image_detect', image: 'wait.png', region }, then: [], else: [] } }]), { preview: true });
+  await runner.active!.done;
+  assert.equal(runner.state().outcome, 'completed'); assert.equal(scans, 0);
+});
 test('condition selects only the matching branch', async () => {
   const inputs: any[] = [];
   const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => null, input: {

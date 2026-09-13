@@ -34,8 +34,19 @@ test('rejects unsupported schema, actions, nonfinite values and oversized trees'
   assert.throws(() => validateDocument(doc({ ...a, actions: Array.from({ length: 1001 }, () => ({ type: 'stop' })) })), /1,000/);
 });
 
+test('retry wraps an image action or a condition with a wide count range', () => {
+  const a = newMacro();
+  const region = { x: 0, y: 0, width: 100, height: 100 };
+  const cond = { type: 'condition', test: { type: 'image_detect', image: 'a.png', region }, then: [{ type: 'key', keys: 'space' }], else: [] };
+  const validated = validateDocument(doc({ ...a, actions: [{ type: 'retry', count: 10000, interval_ms: 3000, action: cond }] })).macros[0].actions[0];
+  assert.equal(validated.count, 10000);
+  assert.equal((validated.action as any).type, 'condition');
+  assert.throws(() => validateDocument(doc({ ...a, actions: [{ type: 'retry', count: 10001, action: cond }] })), /retry\.count/);
+  assert.throws(() => validateDocument(doc({ ...a, actions: [{ type: 'retry', action: { type: 'key', keys: 'space' } }] })), /조건 분기/);
+});
+
 test('random wait defaults to 1–60 seconds and rejects reversed bounds',()=>{
- const action=validateDocument(doc({...newMacro(),actions:[{type:'random_wait'}]})).macros[0].actions[0];
+  const action=validateDocument(doc({...newMacro(),actions:[{type:'random_wait'}]})).macros[0].actions[0];
  assert.equal(action.min_seconds,1);assert.equal(action.max_seconds,60);
  for(const range of [{min_seconds:0,max_seconds:60},{min_seconds:61,max_seconds:60},{min_seconds:1,max_seconds:3601}]) assert.throws(()=>validateDocument(doc({...newMacro(),actions:[{type:'random_wait',...range}]})));
 });

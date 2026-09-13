@@ -98,6 +98,8 @@ export class MacroRunner {
   onClickPoint: ((point: { x: number; y: number }) => void) | null;
   current: RunnerState = { status: 'STOPPED', runId: null, macroId: null, step: null, preview: false, completed: 0, error: null, outcome: null };
   active: ActiveRun | null = null;
+  // 조건 분기가 마지막에 탄 가지. retry가 조건 분기를 감쌀 때 거짓이면 재시도한다.
+  lastBranch: 'then' | 'else' | null = null;
 
   constructor({ input = null, imageMatcher = null, authorize = async () => { throw new Error('실제 실행은 창·권한·라이선스 연결 후 사용할 수 있습니다.'); }, onState = () => {}, onClickPoint = null }: {
     input?: InputAdapter | null;
@@ -224,13 +226,26 @@ export class MacroRunner {
       else if (action.type === 'retry') {
         let lastError: Error | undefined;
         for (let attempt = 0; attempt <= (action.count as number); attempt += 1) {
-          try { await this.execute([action.action as MacroAction], control, macro, preview, step, 0); lastError = undefined; break; }
+          try {
+            if (preview) { await this.execute([action.action as MacroAction], control, macro, preview, step, 0); lastError = undefined; break; }
+            this.lastBranch = null;
+            await this.execute([action.action as MacroAction], control, macro, preview, step, 0);
+            // 조건 분기를 감싸면 거짓 가지를 실패로 간주한다. 대기 후 다시 발견으로 돌아간다.
+            if ((action.action as MacroAction).type === 'condition' && this.lastBranch === 'else') {
+              lastError = new Error('이미지를 찾지 못했습니다. 다시 확인합니다.');
+              if (attempt === (action.count as number)) throw lastError;
+              await control.wait(action.interval_ms as number);
+              continue;
+            }
+            lastError = undefined; break;
+          }
           catch (error) { lastError = error as Error; if (control.abort.signal.aborted || attempt === (action.count as number)) throw error; await control.wait(action.interval_ms as number); }
         }
         if (lastError) throw lastError;
       }
       else if (action.type === 'condition') {
         const matched = preview ? false : Boolean(await this.findImage(action.test as MacroAction, control));
+        this.lastBranch = matched ? 'then' : 'else';
         await this.execute(matched ? action.then as MacroAction[] : action.else as MacroAction[], control, macro, preview, [...step, matched ? 'then' : 'else'], 0);
       }
       else if (action.type === 'repeat') {

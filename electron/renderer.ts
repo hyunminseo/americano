@@ -596,8 +596,8 @@ function nodeHtml(macro: UiMacro, action: UiAction, step: (string | number)[], d
   } else if (action.type === 'repeat') {
     children = '<div class="flow-lane"><p class="lane-title">반복 ×' + action.count + '</p>' + (action.actions as UiAction[]).map((child, i) => nodeHtml(macro, child, [...step, i], { container: editKey, index: i })).join('<div class="flow-link"></div>') + addSlot(editKey) + '</div>';
   } else if (action.type === 'retry') {
-    const imageOptions = ['image_detect', 'image_wait', 'image_click', 'smart_click'].map((type) => `<option value="${type}">${typeLabels[type]}</option>`).join('');
-    children = '<div class="flow-lane"><p class="lane-title">재시도 대상</p>' + nodeHtml(macro, action.action as UiAction, [...step, 'action', 0], null) + '<div class="flow-add"><select data-replace="' + escapeHtml(editKey) + '" aria-label="교체할 이미지 동작">' + imageOptions + '</select><button data-replace-btn="' + escapeHtml(editKey) + '">교체</button></div></div>';
+    const imageOptions = ['image_detect', 'image_wait', 'image_click', 'smart_click', 'condition'].map((type) => `<option value="${type}">${typeLabels[type]}</option>`).join('');
+    children = '<div class="flow-lane"><p class="lane-title">재시도 대상</p>' + nodeHtml(macro, action.action as UiAction, [...step, 'action', 0], null) + '<div class="flow-add"><select data-replace="' + escapeHtml(editKey) + '" aria-label="교체할 재시도 대상">' + imageOptions + '</select><button data-replace-btn="' + escapeHtml(editKey) + '">교체</button></div></div>';
   }
   const dropAttrs = drop ? ` data-container="${escapeHtml(drop.container)}" data-index="${drop.index}"` : '';
   const grip = drop ? '<span class="node-grip" data-grip title="끌어 순서 변경">⠿</span>' : '';
@@ -638,7 +638,7 @@ function describeAction(macro: UiMacro, action: UiAction, number: number[]): str
     case 'image_wait': text = `◎ ${sentenceThumb(macro, action.image)}${escapeHtml(assetName(macro, action.image))} 나타날 때까지 기다리기 · ${sentenceTimeout(action)}`; break;
     case 'image_click': text = `🎯 ${sentenceThumb(macro, action.image)}${escapeHtml(assetName(macro, action.image))} 나타나면 누르기`; break;
     case 'smart_click': text = `🧠 ${sentenceThumb(macro, action.image)}${escapeHtml(assetName(macro, action.image))} 눌러서 화면 바꾸기`; break;
-    case 'retry': text = `↻ 최대 ${action.count}회 재시도`; break;
+    case 'retry': text = `↻ 최대 ${action.count}회 재시도:${nested(action.action ? [action.action as UiAction] : [])}`; break;
     case 'condition': text = `⑂ ${sentenceThumb(macro, (action.test as UiAction)?.image)}${escapeHtml(assetName(macro, (action.test as UiAction)?.image))} 보이면:${nested(action.then as UiAction[])} 안 보이면:${nested(action.else as UiAction[])}`; break;
     case 'repeat': text = `🔁 ${action.count}회 반복:${nested(action.actions as UiAction[])}`; break;
     case 'stop': text = `■ 중단`; break;
@@ -673,7 +673,15 @@ function walkActions(items: UiAction[] | undefined, visit: (action: UiAction, st
       walkActions(action.then as UiAction[], visit, [...step, 'then']);
       walkActions(action.else as UiAction[], visit, [...step, 'else']);
     }
-    if (action.type === 'retry' && action.action) visit(action.action as UiAction, [...step, 'action']);
+    if (action.type === 'retry' && action.action) {
+      const nested = action.action as UiAction;
+      visit(nested, [...step, 'action']);
+      if (nested.type === 'condition') {
+        if (nested.test) visit(nested.test as UiAction, [...step, 'action', 'test']);
+        walkActions(nested.then as UiAction[], visit, [...step, 'action', 'then']);
+        walkActions(nested.else as UiAction[], visit, [...step, 'action', 'else']);
+      }
+    }
   });
 }
 
