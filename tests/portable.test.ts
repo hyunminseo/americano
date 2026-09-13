@@ -1,0 +1,117 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import sharp from 'sharp';
+import type { TestContext } from 'node:test';
+import { MacroStore } from '../src/store.js';
+import { newMacro, validateDocument } from '../src/macros.js';
+import { exportMacro, importMacro, decodePackage, rebindOverlay, assertRunnable } from '../src/portable.js';
+import { MacroRunner } from '../src/runner.js';
+
+const protector = { isEncryptionAvailable: () => true, encryptString: (s: any) => Buffer.from(s), decryptString: (b: any) => b.toString() };
+async function fixture(t: TestContext): Promise<any> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'americano-portable-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const source = new MacroStore(path.join(dir, 'source'), protector); await source.open();
+  const destination = new MacroStore(path.join(dir, 'destination'), protector); await destination.open();
+  const image = await sharp({ create: { width: 12, height: 8, channels: 3, background: '#3167ab' } }).png().toBuffer();
+  const file = await source.saveImage(image);
+  const macro = { ...newMacro(), overlay: { x: 100, y: 200, width: 400, height: 300 }, target_window: { process_name: 'app.exe', executable_path: 'C:\\machine\\app.exe' },
+    images: [{ id: 'image', name: '버튼', path: file, region: { x: 120, y: 230, width: 12, height: 8 } }],
+    actions: [{ type: 'condition', test: { type: 'image_detect', image: file }, then: [{ type: 'repeat', count: 2, actions: [{ type: 'click', x: 140, y: 250 }] }], else: [{ type: 'retry', action: { type: 'image_wait', image: file } }] }] };
+  return { dir, source, destination, macro, image };
+}
+test('portable roundtrip embeds nested image references, remaps IDs and encrypts on destination', async (t: TestContext) => {
+  const { source, destination, macro, image } = await fixture(t);
+  const bytes = await exportMacro(macro, source);
+  assert.equal(bytes.includes(Buffer.from(source.directory.replaceAll('\\', '\\\\'))), false);
+  assert.equal(JSON.parse(bytes.toString()).macro.target_window.executable_path, undefined);
+  const id = await importMacro(bytes, destination);
+  const imported = destination.snapshot().macros[0];
+  assert.equal(imported.id, id); assert.notEqual(id, macro.id);
+  assert.equal(imported.overlay, null); assert.equal(imported.binding.needs_overlay, true);
+  assert.throws(() => assertRunnable(imported), /재지정/);
+  const file = imported.images[0].path;
+  assert.notEqual(file, macro.images[0].path);
+  assert.deepEqual(await destination.readImage(file), image);
+  assert.equal(imported.actions[0].test.image, file);
+  assert.equal(imported.actions[0].else[0].action.image, file);
+  assert.deepEqual(imported.actions[0].then[0].actions[0], { type: 'click', timeout_ms: 10000, x: 40, y: 50, coordinate_space: 'overlay', button: 'left' });
+  const rebound = rebindOverlay(imported, { x: 300, y: 400, width: 400, height: 300 });
+  assert.doesNotThrow(() => assertRunnable(rebound));
+  const inputs: any[] = [];
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => ({ x: 0, y: 0, width: 1, height: 1, score: 1 }), input: { execute: async (action: any) => { inputs.push(action); }, releaseAll: async () => {} } });
+  runner.start(rebound); await runner.active!.done;
+  assert.equal(runner.state().outcome, 'completed');
+  assert.deepEqual(inputs.map((a: any) => [a.x, a.y]), [[340, 450], [340, 450]]);
+});
+test('changed dimensions and external client coordinates require explicit review', async (t: TestContext) => {
+  const { source, macro } = await fixture(t);
+  macro.actions.push({ type: 'click', x: 20, y: 10 });
+  const { macro: imported } = await decodePackage(await exportMacro(macro, source));
+  const rebound = rebindOverlay(imported, { x: 0, y: 0, width: 800, height: 600 });
+  assert.equal(rebound.binding!.needs_review, true);
+  assert.throws(() => assertRunnable(rebound), /검토/);
+  assert.equal(rebound.actions[1].x, 20);
+  rebound.binding!.needs_review = false;
+  assert.doesNotThrow(() => assertRunnable(rebound));
+  rebound.overlay!.width = 30;
+  assert.throws(() => assertRunnable(rebound), /범위/);
+});
+test('malformed packages reject before writing and cannot reference external files', async (t: TestContext) => {
+  const { source, destination, macro } = await fixture(t);
+  const raw = JSON.parse((await exportMacro(macro, source)).toString());
+  const before = await fs.readdir(destination.directory);
+  raw.macro.actions[0].test.image = 'C:\\outside.png';
+  await assert.rejects(importMacro(Buffer.from(JSON.stringify(raw)), destination), /참조/);
+  assert.deepEqual(await fs.readdir(destination.directory), before);
+  raw.macro.actions[0].test.image = raw.assets[0].id;
+  raw.assets.push(raw.assets[0]);
+  await assert.rejects(decodePackage(Buffer.from(JSON.stringify(raw))), /중복/);
+  raw.assets.pop(); raw.assets[0].data = Buffer.from('not an image').toString('base64');
+  await assert.rejects(decodePackage(Buffer.from(JSON.stringify(raw))));
+});
+test('failed document commit rolls back newly encrypted images', async (t: TestContext) => {
+  const { source, destination, macro } = await fixture(t);
+  const before = await fs.readdir(destination.directory);
+  destination.save = async () => { throw new Error('disk full'); };
+  await assert.rejects(importMacro(await exportMacro(macro, source), destination), /disk full/);
+  assert.deepEqual(await fs.readdir(destination.directory), before);
+});
+test('smart click assets including expected image remap across export and import', async (t: TestContext) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'americano-portable-smart-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const source = new MacroStore(path.join(dir, 'source'), protector); await source.open();
+  const destination = new MacroStore(path.join(dir, 'destination'), protector); await destination.open();
+  const image = await sharp({ create: { width: 12, height: 8, channels: 3, background: '#ab6731' } }).png().toBuffer();
+  const fileA = await source.saveImage(image);
+  const fileB = await source.saveImage(image);
+  const macro = { ...newMacro(), overlay: { x: 0, y: 0, width: 400, height: 300 },
+    actions: [{ type: 'smart_click', image: fileA, expect_image: fileB, region: { x: 0, y: 0, width: 400, height: 300 } }] };
+  const id = await importMacro(await exportMacro(macro, source), destination);
+  const step = destination.snapshot().macros.find((item: any) => item.id === id)!.actions[0];
+  assert.equal(step.type, 'smart_click');
+  assert.notEqual(step.image, fileA); assert.notEqual(step.expect_image, fileB);
+  assert.deepEqual(await destination.readImage(step.image as string), image);
+  assert.deepEqual(await destination.readImage(step.expect_image as string), image);
+});
+test('export names the step missing its reference image', async (t: TestContext) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'americano-portable-empty-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const source = new MacroStore(path.join(dir, 'source'), protector); await source.open();
+  const macro = { ...newMacro(), actions: [
+    { type: 'condition', test: { type: 'image_detect', image: '', region: { x: 0, y: 0, width: 100, height: 100 } }, then: [], else: [{ type: 'image_wait', image: '', region: { x: 0, y: 0, width: 100, height: 100 } }] },
+  ] };
+  await assert.rejects(exportMacro(macro, source), /1\.검사\.1단계의 기준 이미지/);
+});
+test('legacy client coordinates remain unchanged in schema and execution', async () => {
+  const raw = { ...newMacro(), actions: [{ type: 'click', x: 50, y: 60 }] };
+  const macro = validateDocument({ version: 2, macros: [raw] }).macros[0];
+  assert.equal(macro.actions[0].coordinate_space, undefined);
+  const inputs: any[] = [];
+  const runner = new MacroRunner({ authorize: async () => {}, input: { execute: async (a: any) => { inputs.push(a); }, releaseAll: async () => {} } });
+  runner.start(macro); await runner.active!.done;
+  assert.equal(inputs[0].x, 50); assert.equal(inputs[0].y, 60);
+});

@@ -192,3 +192,108 @@ body { background: #ece8df; font-family: "Trebuchet MS", "Segoe UI", sans-serif;
 #inspector { position: sticky; top: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); padding: 14px; }
 #inspector h4 { margin: 0 0 4px; font-size: 14px; }
 .portable-panel { padding: 12px 16px; margin: 16px 0; background: #f1f5fa; border-radius: 10px; }
+/* Capture shelf and structured flow canvas */
+.studio-flow { grid-template-columns: minmax(0, 1fr); }
+.flow-col, .capture-studio, .work-area { min-width: 0; }
+.capture-studio .asset-list { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 12px; padding: 10px; scroll-snap-type: x proximity; scrollbar-gutter: stable; }
+.capture-studio .asset-card { flex: 0 0 230px; min-width: 0; border-color: var(--line); background: var(--white); scroll-snap-align: start; }
+.capture-studio .asset-select { flex-wrap: wrap; }
+.capture-studio .asset-select img { width: 100%; height: 104px; object-fit: contain; }
+.capture-studio .asset-meta strong { max-width: 185px; }
+.capture-studio .asset-tools { justify-content: space-between; }
+.capture-hint { color: var(--muted); font-size: 12px; }
+.asset-list:focus-visible, .asset-tools button:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+.asset-tools button:disabled { opacity: .35; cursor: default; }
+.workflow { padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: radial-gradient(#d8cfc0 1px, transparent 1px) 0 0 / 18px 18px #faf7f1; overflow-x: auto; }
+.workflow .section-heading { gap: 12px; flex-wrap: wrap; }
+.workflow .section-heading small { color: var(--muted); }
+#flow { min-width: 360px; padding: 16px 2px; }
+.flow-terminal { align-self: center; padding: 8px 20px; border: 1px solid #b9cbb8; border-radius: 24px; background: #eaf1e7; font-size: 12px; text-align: center; }
+.flow-link { position: relative; height: 24px; margin: 0 auto; background: #aa9c87; }
+.flow-link::after { content: ''; position: absolute; bottom: 0; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #aa9c87; }
+.flow-lanes { grid-template-columns: repeat(2, minmax(280px, 1fr)); }
+.flow-lane { background: rgba(248,245,239,.85); }
+.node-main { min-width: 0; }
+@media (max-width: 900px) { #inspector { position: static; } }
+.flow-lane .node-line { flex-wrap: wrap; }
+.flow-lane .node-main { flex: 1 1 170px; }
+.flow-lane .node-ops { margin-left: auto; }
+.node-text strong { word-break: keep-all; }
+/* v4: contain the graph inside a navigable canvas, including nested branches. */
+.workflow { padding: 0; overflow: hidden; }
+.workflow > .section-heading { padding: 16px; margin: 0; }
+.canvas-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; background: var(--white); border-block: 1px solid var(--line); }
+.canvas-tools button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: #f8f4ed; }
+.canvas-tools output { min-width: 42px; text-align: center; font-size: 12px; }
+.canvas-tools small { font-size: 11px; color: var(--muted); }
+#flow-viewport { height: 65vh; min-height: 360px; max-height: 820px; overflow: auto; overscroll-behavior: contain; cursor: grab; }
+#flow-viewport.panning { cursor: grabbing; user-select: none; }
+#flow-viewport #flow { width: max-content; min-width: 100%; box-sizing: border-box; padding: 28px; }
+#flow .flow-node { min-width: 300px; cursor: default; }
+#flow .flow-lanes { grid-template-columns: max-content max-content; justify-content: space-between; }
+#flow .flow-lane { min-width: 320px; }
+#flow .node-sub { max-width: 360px; }
+#flow .node-text strong { white-space: nowrap; }
+#flow-viewport #flow { min-width: 700px; }
+/* Let the workflow use the available window; keep supporting controls compact. */
+.shell { width: 100%; max-width: none; padding: 12px 18px; }
+.topbar { gap: 12px; }
+.eyebrow { margin-bottom: 4px; }
+.button { padding: 7px 11px; }
+.toolbar { padding: 8px 0; }
+.notice { padding: 6px 10px; font-size: 12px; }
+.macro-head { margin: 10px 0 4px; }
+.macro-head h3, .capture-studio h3 { font-size: 17px; }
+.target-row { gap: 10px; padding: 8px 10px; margin: 6px 0; }
+.target-row strong { font-size: 13px; }
+.target-meta { gap: 8px; font-size: 11px; }
+.settings { margin: 6px 0; font-size: 12px; }
+.studio-flow { gap: 10px; margin: 10px 0; }
+/* 탐지 이미지가 순서도 편집보다 항상 위에 온다. */
+.work-area { grid-template-columns: minmax(0, 1fr) 240px; gap: 10px; }
+.workflow > .section-heading { padding: 9px 12px; }
+.workflow > .section-heading h3 { font-size: 19px; }
+.canvas-tools { padding: 6px 10px; gap: 6px; }
+#flow-viewport { height: calc(100vh - 300px); min-height: 420px; max-height: none; }
+#inspector { padding: 10px; font-size: 12px; max-height: calc(100vh - 100px); overflow-y: auto; }
+#inspector .form-grid { gap: 8px; margin: 8px 0; }
+#inspector input, #inspector select, .target-controls select { min-width: 0; padding: 6px; font-size: 12px; }
+.capture-studio { padding: 10px 12px; }
+.capture-studio p { font-size: 11px; line-height: 1.4; }
+.capture-studio .asset-list { margin: 8px 0; padding: 6px; gap: 8px; }
+.capture-studio .asset-card { flex-basis: 185px; padding: 4px; }
+.capture-studio .asset-select img { height: 64px; }
+.capture-studio .asset-meta strong { max-width: 145px; }
+.capture-studio .asset-tools { gap: 4px; }
+.capture-studio .asset-tools button { padding: 4px 7px; }
+.capture-studio .form-grid { grid-template-columns: repeat(2, minmax(140px, 220px)); gap: 8px; margin: 8px 0; }
+.capture-studio .form-grid label { font-size: 12px; gap: 4px; }
+.capture-studio input, .capture-studio select { padding: 5px 7px; font-size: 12px; }
+.portable-panel { padding: 8px 10px; margin: 8px 0; font-size: 12px; }
+.sentence-view ol { margin: 8px 0; padding-left: 22px; }
+.flow-node.dimmed, .flow-node.search-dim { opacity: 0.3; }
+.flow-node.traced { outline: 2px solid var(--orange); outline-offset: 2px; }
+.macro-head h3 input { font-size: 17px; font-weight: bold; border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; background: transparent; width: 320px; }
+.macro-head h3 input:hover { border-color: var(--line); }
+.macro-head h3 input:focus { border-color: var(--orange); background: #fff; outline: none; }
+.utterance-panel { margin: 6px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }
+.utterance-panel textarea { width: 100%; box-sizing: border-box; padding: 6px; font-size: 12px; }
+.utterance-panel .utterance-actions { display: flex; gap: 8px; margin: 8px 0; }
+.ai-settings { margin-top: 8px; font-size: 12px; }
+#receipt { margin: 8px 0; font-size: 12px; }
+#receipt ul { margin: 6px 0; padding-left: 20px; }
+#receipt li { margin: 4px 0; }
+#node-search { padding: 6px; font-size: 12px; min-width: 140px; }
+.provider-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; font-size: 12px; }
+.provider-row em { font-style: normal; color: #2f7d33; font-weight: bold; }
+.provider-row input { padding: 4px 6px; font-size: 12px; }
+.provider-row button { padding: 4px 10px; }
+.sentence-view li { margin: 6px 0; font-size: 13px; line-height: 1.7; }
+.sentence-view .sentence-thumb { height: 28px; vertical-align: middle; margin: 0 6px; border: 1px solid var(--line); border-radius: 4px; }
+.sentence-view small { color: var(--muted); }
+footer { margin-top: 12px; }
+@media (max-width: 900px) {
+  .shell { padding: 10px; }
+  .work-area { grid-template-columns: minmax(0, 1fr); }
+  #inspector { max-height: 280px; }
+}

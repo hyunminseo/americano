@@ -1,32 +1,36 @@
 {
   "name": "americano",
-  "version": "1.0.0",
+  "version": "4.2.0",
   "description": "Windows screen automation manager",
-  "main": "electron/main.js",
+  "main": "compiled/electron/main.js",
   "private": true,
   "engines": {
     "node": ">=24.0.0 <25.0.0",
     "npm": ">=11.0.0 <12.0.0"
   },
   "scripts": {
-    "test": "node --test",
-    "start": "electron .",
-    "dev": "electron .",
-    "build:icon": "node scripts/build-icon.cjs",
-    "build": "npm run build:icon && electron-builder --win portable --x64",
-    "build:license-compare": "npm run build:icon && node scripts/build-license-comparison.cjs",
-    "license:init": "node scripts/license-issuer.cjs init",
-    "test:overlay-ui": "electron scripts/overlay-ui-smoke.cjs",
-    "test:keyboard-ui": "electron scripts/keyboard-ui-smoke.cjs",
-    "test:image-scenario": "electron scripts/image-scenario-smoke.cjs",
-    "test:image-mabinogi": "electron scripts/image-scenario-mabinogi.cjs"
+    "test": "npm run build:ts && node --test compiled/tests",
+    "start": "npm run build:ts && electron .",
+    "dev": "npm run build:ts && electron .",
+    "build:ts": "tsc && node compiled/scripts/copy-assets.js",
+    "fetch:opencode": "npm run build:ts && node compiled/scripts/fetch-opencode.js",
+    "build:icon": "node compiled/scripts/build-icon.js",
+    "build": "npm run fetch:opencode && npm run build:icon && electron-builder --win portable --x64",
+    "build:license-compare": "npm run build:ts && npm run build:icon && node compiled/scripts/build-license-comparison.js",
+    "license:init": "npm run build:ts && node compiled/scripts/license-issuer.js init",
+    "test:overlay-ui": "npm run build:ts && electron compiled/scripts/overlay-ui-smoke.js",
+    "test:keyboard-ui": "npm run build:ts && electron compiled/scripts/keyboard-ui-smoke.js",
+    "test:image-scenario": "npm run build:ts && electron compiled/scripts/image-scenario-smoke.js",
+    "test:image-mabinogi": "npm run build:ts && electron compiled/scripts/image-scenario-mabinogi.js"
   },
   "devDependencies": {
     "electron": "^38.0.0",
-    "electron-builder": "^26.0.0"
+    "electron-builder": "^26.0.0",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6",
+    "@opencode-ai/sdk": "^1.18.30",
     "koffi": "^3.2.1",
     "screenshot-desktop": "^1.15.0",
     "sharp": "^0.34.3"
@@ -36,21 +40,9 @@
     "productName": "Americano",
     "asar": true,
     "files": [
-      "electron/**/*",
-      "src/macros.js",
-      "src/portable.js",
-      "src/keyboard.js",
-      "src/store.js",
-      "src/runner.js",
-      "src/license.js",
-      "src/capture.js",
-      "src/matcher.js",
-      "src/detect.js",
-      "src/windows.js",
-      "src/input-adapter.js",
-      "src/uo-script/**/*",
-      "src/overlay.js",
-      "src/native-windows.js"
+      "compiled/electron/**/*",
+      "compiled/src/**/*",
+      "compiled/package.json"
     ],
     "asarUnpack": [
       "node_modules/screenshot-desktop/lib/win32/**/*",
@@ -61,6 +53,10 @@
       {
         "from": "licensing/public-key.pem",
         "to": "licensing/public-key.pem"
+      },
+      {
+        "from": "vendor/opencode",
+        "to": "opencode"
       }
     ],
     "win": {
