@@ -45,6 +45,17 @@ test('retry wraps an image action or a condition with a wide count range', () =>
   assert.throws(() => validateDocument(doc({ ...a, actions: [{ type: 'retry', action: { type: 'key', keys: 'space' } }] })), /조건 분기/);
 });
 
+test('roi and threshold save instead of failing on range', () => {
+  const a = newMacro();
+  const region = { x: 0, y: 0, width: 100, height: 100 };
+  const act = (overrides: any): any => validateDocument(doc({ ...a, actions: [{ type: 'image_detect', image: 'a.png', region, ...overrides }] })).macros[0].actions[0];
+  assert.deepEqual(act({ roi: { x: 0.762, y: 0.331, width: 0.2, height: 0.305 } }).roi, { x: 0.762, y: 0.331, width: 0.2, height: 0.305 });
+  assert.deepEqual(act({ roi: { x: 0.762, y: 0.331, width: 0.276, height: 0.305 } }).roi, { x: 0.762, y: 0.331, width: 0.238, height: 0.305 });
+  assert.deepEqual(act({ roi: { x: '0.5', y: 0, width: 1.5, height: -2 } }).roi, { x: 0.5, y: 0, width: 0.5, height: 1 });
+  assert.equal(act({ threshold: '0.95' }).threshold, 0.95);
+  assert.equal(act({ threshold: 7 }).threshold, 1);
+});
+
 test('random wait defaults to 1–60 seconds and rejects reversed bounds',()=>{
   const action=validateDocument(doc({...newMacro(),actions:[{type:'random_wait'}]})).macros[0].actions[0];
  assert.equal(action.min_seconds,1);assert.equal(action.max_seconds,60);

@@ -26,7 +26,10 @@ test('이미지 액션에 ROI·전처리·피라미드·특징점 옵션이 검�
   assert.equal(full.preprocess, 'normalize');
   assert.equal(full.pyramid, true);
   assert.equal(full.features, 'fallback');
-  assert.throws(() => imageAction({ roi: { x: 0.8, y: 0, width: 0.5, height: 0.5 } }), /벗어/);
+  const clipped = imageAction({ roi: { x: 0.8, y: 0, width: 0.5, height: 0.5 } });
+  assert.deepEqual(clipped.roi, { x: 0.8, y: 0, width: 0.2, height: 0.5 });
+  const precise = imageAction({ roi: { x: 0.762, y: 0.331, width: 0.2, height: 0.305 } });
+  assert.deepEqual(precise.roi, { x: 0.762, y: 0.331, width: 0.2, height: 0.305 });
   assert.throws(() => imageAction({ preprocess: 'equalize' }), /preprocess/);
   assert.throws(() => imageAction({ features: 'sift' }), /features/);
 });

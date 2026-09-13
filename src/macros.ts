@@ -101,8 +101,10 @@ function integer(value: unknown, name: string, min: number, max: number): number
 }
 
 function number(value: unknown, name: string, min: number, max: number): number {
-  if (typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max) return value;
-  throw new MacroError(`${name}: ${min}~${max} 범위의 숫자가 필요합니다.`);
+  const raw = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) throw new MacroError(`${name}: 숫자가 아닙니다.`);
+  // 범위를 벗어나면 저장 실패 대신 자동으로 맞춘다.
+  return Math.min(max, Math.max(min, raw));
 }
 
 function region(value: unknown, name = 'region'): Region {
@@ -116,17 +118,27 @@ function region(value: unknown, name = 'region'): Region {
 }
 
 function fraction(value: unknown, name: string): number {
-  if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1) return value;
-  throw new MacroError(`${name}: 0~1 범위의 숫자가 필요합니다.`);
+  const raw = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) throw new MacroError(`${name}: 숫자가 아닙니다.`);
+  return Math.min(1, Math.max(0, raw));
 }
 
 function roi(value: unknown): Roi | null {
   if (value == null) return null;
   if (typeof value !== 'object' || Array.isArray(value)) fail('roi: 관심 영역이 잘못되었습니다.');
   const source = value as Partial<Roi>;
-  const result = { x: fraction(source.x ?? 0, 'roi.x'), y: fraction(source.y ?? 0, 'roi.y'), width: fraction(source.width ?? 1, 'roi.width'), height: fraction(source.height ?? 1, 'roi.height') };
-  if (result.width <= 0 || result.height <= 0 || result.x + result.width > 1 || result.y + result.height > 1) fail('roi: 영역이 오버레이를 벗어났습니다.');
-  return result;
+  let x = fraction(source.x ?? 0, 'roi.x');
+  let y = fraction(source.y ?? 0, 'roi.y');
+  let width = fraction(source.width ?? 1, 'roi.width');
+  let height = fraction(source.height ?? 1, 'roi.height');
+  // 박스가 오버레이를 벗어나면 저장 실패 대신 안으로 맞춘다.
+  width = Math.min(width, 1 - x);
+  height = Math.min(height, 1 - y);
+  if (width <= 0) { x = 0; width = 1; }
+  if (height <= 0) { y = 0; height = 1; }
+  // 맞춤 연산의 부동소수점 먼지만 털고, 입력 자릿수는 그대로 둔다.
+  const clean = (v: number): number => Math.round(v * 1e6) / 1e6;
+  return { x: clean(x), y: clean(y), width: clean(width), height: clean(height) };
 }
 
 interface RawAction extends Record<string, unknown> {
