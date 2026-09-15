@@ -181,6 +181,23 @@ test('smart click accepts an expected image appearing instead of disappearance',
   assert.deepEqual([inputs[0].x, inputs[0].y], [10, 10]);
 });
 
+test('retry publishes attempt progress and collects run stats', async () => {
+  let scans = 0;
+  const seen: any[] = [];
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => (++scans >= 3 ? { x: 0, y: 0, width: 10, height: 10, score: 1 } : null), input: { execute: async () => {}, releaseAll: async () => {} }, onState: (state: any) => { seen.push({ step: state.step, attempt: state.attempt, attempts: state.attempts }); } });
+  const region = { x: 0, y: 0, width: 100, height: 100 };
+  runner.start(macro([{ type: 'retry', count: 5, interval_ms: 0, action: { type: 'image_detect', image: 'wait.png', region } }]));
+  await runner.active!.done;
+  assert.equal(runner.state().outcome, 'completed');
+  const attempts = seen.filter((s) => s.attempt);
+  assert.deepEqual(attempts.map((s) => s.attempt), [1, 2, 3]);
+  assert.deepEqual(attempts[0], { step: [0], attempt: 1, attempts: 6 });
+  const nested = runner.runStats().filter((s) => s.key === '0.0');
+  assert.equal(nested.length, 3);
+  assert.equal(nested.reduce((total, s) => total + s.scans, 0), 3);
+  assert.ok(nested.every((s) => s.ms >= 0));
+  assert.equal(runner.state().attempt, null);
+});
 test('random wait samples within its bounds on each execution and supports stop',async()=>{
  const runner=new MacroRunner();const waits: number[]=[];
  const control={checkpoint:async()=>{},wait:async (ms: number)=>waits.push(ms)};

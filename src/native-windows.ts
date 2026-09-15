@@ -27,6 +27,7 @@ const ancestor = user.func('void * __stdcall GetAncestor(void *window, uint32_t 
 const setCursor = user.func('int __stdcall SetCursorPos(int x, int y)');
 const getCursor = user.func('int __stdcall GetCursorPos(_Out_ AmericanoPoint *point)');
 const systemMetric = user.func('int __stdcall GetSystemMetrics(int index)');
+const post = user.func('int __stdcall PostMessageW(void *hwnd, uint32_t msg, intptr_t wparam, intptr_t lparam)');
 
 export type WindowHandle = unknown;
 
@@ -166,4 +167,10 @@ export function activate(handle: WindowHandle): void {
 export function isForeground(handle: WindowHandle): boolean {
   const active = foreground();
   return Boolean(active && koffi.address(active) === koffi.address(handle));
+}
+
+// 백그라운드 입력: 커서를 움직이거나 창을 전경으로 가져오지 않고
+// 대상 창의 메시지 큐에 직접 전달한다. DirectInput 계열 게임은 무시할 수 있다.
+export function postMessage(handle: WindowHandle, msg: number, wParam: number, lParam: number): void {
+  if (!post(handle, msg, wParam, lParam)) throw new Error('창에 입력을 전달하지 못했습니다. 창이 닫혔거나 권한이 다릅니다.');
 }

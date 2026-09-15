@@ -70,6 +70,27 @@ export interface OverlayBinding {
   source_overlay: Region | null;
 }
 
+// 실행 통계: 단계 키(예: "6", "6.then.0")별 누적 기록. 자동 최적화의 근거다.
+export interface ActionStats {
+  runs: number;
+  hits: number;
+  misses: number;
+  scans: number;
+  ms: number;
+  type?: string;
+}
+
+export type MacroStats = Record<string, ActionStats>;
+
+// 한 번의 실행에서 모은 단계별 기록. runner가 채우고 store가 누적한다.
+export interface StepStatEntry {
+  key: string;
+  type: string;
+  scans: number;
+  ms: number;
+  ok: boolean;
+}
+
 export interface MacroDocument {
   id: string;
   name: string;
@@ -78,6 +99,8 @@ export interface MacroDocument {
   enabled: boolean;
   hotkey: string;
   target_window: TargetWindow;
+  input_mode: 'foreground' | 'background';
+  stats: MacroStats;
   images: ImageAsset[];
   actions: MacroAction[];
   overlay: Region | null;
@@ -338,6 +361,21 @@ export function validateDocument(raw: RawDocument): { version: 2; macros: MacroD
         needs_review: bindingSource.needs_review === true,
         source_overlay: bindingSource.source_overlay == null ? null : region(bindingSource.source_overlay, 'binding.source_overlay'),
       };
+      // 입력 방식: 전경(지금처럼 커서 점유) 또는 백그라운드(창에 직접 전달).
+      const input_mode = item.input_mode === 'background' ? 'background' : 'foreground';
+      // 실행 통계: 비정상 entries는 버리고 최대 200개 키만 유지한다.
+      const stats: MacroStats = {};
+      const rawStats = (item.stats ?? {}) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(rawStats).slice(0, 200)) {
+        if (typeof key !== 'string' || !key || key.length > 64 || !value || typeof value !== 'object') continue;
+        const entry = value as Record<string, unknown>;
+        const amount = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.min(n, 1e12) : 0);
+        stats[key] = {
+          runs: amount(entry.runs), hits: amount(entry.hits), misses: amount(entry.misses),
+          scans: amount(entry.scans), ms: amount(entry.ms),
+        };
+        if (typeof entry.type === 'string' && entry.type.length <= 32) stats[key].type = entry.type;
+      }
       return {
         id,
         name,
@@ -346,6 +384,8 @@ export function validateDocument(raw: RawDocument): { version: 2; macros: MacroD
         enabled: item.enabled as boolean,
         hotkey,
         target_window,
+        input_mode,
+        stats,
         overlay,
         loop,
         images,
@@ -358,7 +398,39 @@ export function validateDocument(raw: RawDocument): { version: 2; macros: MacroD
 }
 
 export function newMacro(): MacroDocument {
-  return { id: randomUUID(), name: '새 매크로', description: '', script: '', enabled: false, hotkey: '', target_window: {}, images: [], actions: [{ type: 'wait', duration_ms: 1000 }], overlay: null, loop: { count: 1, interval_ms: 500 }, binding: null };
+  return { id: randomUUID(), name: '새 매크로', description: '', script: '', enabled: false, hotkey: '', target_window: {}, input_mode: 'foreground', stats: {}, images: [], actions: [{ type: 'wait', duration_ms: 1000 }], overlay: null, loop: { count: 1, interval_ms: 500 }, binding: null };
+}
+
+// 실행 통계 기반 자동 최적화. 이미지 탐색의 검색 간격만 안전 범위 안에서 바꾼다.
+// runner의 단계 키("6", "6.then.0", "6.0")와 같은 규칙으로 탐색한다.
+export function applyPerfTuning(macro: MacroDocument): { macro: MacroDocument; changes: string[] } {
+  const tuned = structuredClone(macro);
+  const changes: string[] = [];
+  const displayKey = (key: string): string => key.split('.').map((part) => (/^\d+$/.test(part) ? Number(part) + 1 : (({ test: '검사', then: '참', else: '거짓', action: '재시도' }) as Record<string, string>)[part] || part)).join('.');
+  const visit = (items: MacroAction[], prefix: string): void => {
+    items.forEach((action, index) => {
+      const key = prefix ? `${prefix}.${index}` : String(index);
+      const record = tuned.stats?.[key];
+      if (typeof action.type === 'string' && action.type.startsWith('image_') && record && record.type === action.type && record.runs >= 3) {
+        const avg = record.scans / record.runs;
+        const current = (action.poll_interval_ms ?? 100) as number;
+        if (avg <= 2 && current < 3000) {
+          action.poll_interval_ms = Math.min(3000, current * 2);
+          changes.push(`${displayKey(key)} 탐색간격 ${current}→${action.poll_interval_ms}ms`);
+        } else if (avg >= 20 && current > 100) {
+          action.poll_interval_ms = Math.max(100, Math.floor(current / 2));
+          changes.push(`${displayKey(key)} 탐색간격 ${current}→${action.poll_interval_ms}ms`);
+        }
+      }
+      if (action.type === 'repeat') visit(action.actions as MacroAction[], key);
+      else if (action.type === 'condition') {
+        visit(action.then as MacroAction[], `${key}.then`);
+        visit(action.else as MacroAction[], `${key}.else`);
+      } else if (action.type === 'retry' && action.action) visit([action.action as MacroAction], `${key}`);
+    });
+  };
+  visit(tuned.actions, '');
+  return { macro: tuned, changes };
 }
 
 export { keys };

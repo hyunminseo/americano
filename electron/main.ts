@@ -16,7 +16,7 @@ import type { MatchCandidate, NccMatch } from '../src/detect.js';
 import { createInputAdapter } from '../src/input-adapter.js';
 import { listWindows, findWindow } from '../src/windows.js';
 import { captureTarget, physicalRegion } from '../src/overlay.js';
-import { validateDocument, newMacro, MacroAction, MacroDocument, Region } from '../src/macros.js';
+import { validateDocument, newMacro, MacroAction, MacroDocument, Region, applyPerfTuning } from '../src/macros.js';
 import { resolveScale, effectivePercent, remapRect, learnRoi } from '../src/resolution.js';
 import { scaleTemplate } from '../src/detect.js';
 import { authedFetch, connectOpencode, serverVersion, listProviders, startLogin, finishLogin, setApiKey, isConnected, OpencodeV2Client, ProviderInfo } from '../src/opencode.js';
@@ -41,6 +41,32 @@ let outline: BrowserWindow | undefined;
 let outlineTimer: NodeJS.Timeout | undefined;
 let progressWindow: BrowserWindow | null = null;
 let progressMacroId: string | null = null;
+// 실행 통계·자동 최적화 요약. 실행이 끝날 때 갱신되고 화면에 보여준다.
+let lastPerf: string | null = null;
+let lastTuning: string[] = [];
+let lastRunStatus = 'STOPPED';
+let lastRunId: string | null = null;
+
+function displayStep(key: string): string {
+  return key.split('.').map((part) => (/^\d+$/.test(part) ? Number(part) + 1 : (({ test: '검사', then: '참', else: '거짓', action: '재시도' }) as Record<string, string>)[part] || part)).join('.');
+}
+
+// 실행 종료 시 통계를 누적하고 성능 요약을 만든다. 미리보기는 제외한다.
+async function persistRunStats(run: ReturnType<MacroRunner['state']>): Promise<void> {
+  try {
+    if (run.preview || !run.macroId || !store?.ready) return;
+    const entries = runner.runStats();
+    if (!entries.length) return;
+    await (store as MacroStore).updateRunStats(run.macroId, entries);
+    const visits = entries.length;
+    const scans = entries.reduce((total, entry) => total + entry.scans, 0);
+    const ms = entries.reduce((total, entry) => total + entry.ms, 0);
+    const slowest = entries.reduce((worst, entry) => (entry.ms > worst.ms ? entry : worst), entries[0]);
+    const parts = [`${visits}단계`, `탐색 ${scans}회`, `${(ms / 1000).toFixed(1)}초`, `가장 느림 ${displayStep(slowest.key)}(${(slowest.ms / 1000).toFixed(1)}초)`];
+    if (lastTuning.length) parts.push(`탐색간격 자동조정 ${lastTuning.length}건`);
+    lastPerf = parts.join(' · ');
+  } catch { /* 통계 저장 실패는 실행 결과에 영향을 주지 않는다. */ }
+}
 
 function closeProgress(): void {
   if (progressWindow && !progressWindow.isDestroyed()) progressWindow.destroy();
@@ -140,6 +166,7 @@ const page = pathToFileURL(path.join(__dirname, 'index.html')).href;
 interface BackendState {
   document: { version: 2; macros: MacroDocument[] };
   run: ReturnType<MacroRunner['state']>;
+  perf: string | null;
   error: string | null;
   storageReady: boolean;
   shortcutsReady: boolean;
@@ -154,6 +181,7 @@ function state(): BackendState {
   return {
     document: store?.ready ? store.snapshot() : { version: 2, macros: [] },
     run: runner.state(),
+    perf: lastPerf,
     error: startupError,
     storageReady: Boolean(store?.ready),
     shortcutsReady,
@@ -168,6 +196,12 @@ function state(): BackendState {
 function notify(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     const current = state();
+    const run = current.run;
+    if (lastRunStatus === 'RUNNING' && (run.status === 'STOPPED' || run.status === 'ERROR') && lastRunId && run.runId === lastRunId) {
+      void persistRunStats(run).then(() => notify());
+    }
+    lastRunStatus = run.status;
+    lastRunId = run.runId;
     mainWindow.webContents.send('backend-state', current);
     pushProgress(current);
   }
@@ -715,7 +749,10 @@ else {
             if (!shortcutsReady) throw new Error('F8/F9 단축키를 먼저 확보해야 합니다.');
             const macro = (store as MacroStore).snapshot().macros.find((item) => item.id === payload.macroId);
             if (!macro) throw new Error('매크로를 찾을 수 없습니다.');
-            runner.start(macro, { preview: false, startIndex: (payload.startIndex as number) ?? 0 });
+            // 누적 통계로 탐색 간격을 자동 조정한 복사본으로 실행한다. 저장값은 그대로 둔다.
+            const tuned = applyPerfTuning(macro);
+            lastTuning = tuned.changes;
+            runner.start(tuned.macro, { preview: false, startIndex: (payload.startIndex as number) ?? 0 });
             break;
           }
           case 'pause': runner.pause(); break;

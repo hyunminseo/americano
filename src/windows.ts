@@ -105,9 +105,25 @@ export async function prepareWindow(target: TargetWindow, control: WaitControl |
   return { window, region, dpi: region.dpi };
 }
 
+// 백그라운드용 준비: 전경 전환 없이 창을 찾아 영역만 읽는다. 커서도 안 움직인다.
+export async function prepareWindowBackground(target: TargetWindow, control: WaitControl | undefined): Promise<{ window: WindowInfo; region: ClientRect; dpi: number }> {
+  const window = await findWindow(target, 10000, control);
+  if (control) await control.checkpoint();
+  const region = await readGameGeometry(window.handle);
+  return { window, region, dpi: region.dpi };
+}
+
 export function screenPoint(region: ClientRect, x: number, y: number): { x: number; y: number } {
   const scale = (region.dpi || 96) / 96;
   const point = { x: region.x + Math.round(x * scale), y: region.y + Math.round(y * scale) };
   if (point.x < region.x || point.y < region.y || point.x >= region.x + region.width || point.y >= region.y + region.height) throw new WindowAdapterError('창 상대 좌표가 대상 창 영역을 벗어났습니다.');
+  return point;
+}
+
+// 백그라운드 입력용 창 상대 좌표(픽셀). 화면 좌표가 아니라 client 좌표다.
+export function clientPoint(region: ClientRect, x: number, y: number): { x: number; y: number } {
+  const scale = (region.dpi || 96) / 96;
+  const point = { x: Math.round(x * scale), y: Math.round(y * scale) };
+  if (point.x < 0 || point.y < 0 || point.x >= region.width || point.y >= region.height) throw new WindowAdapterError('창 상대 좌표가 대상 창 영역을 벗어났습니다.');
   return point;
 }

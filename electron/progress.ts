@@ -20,6 +20,8 @@ interface ProgressRun {
   iteration?: number;
   iterations?: number;
   step?: (string | number)[];
+  attempt?: number | null;
+  attempts?: number | null;
   error?: string;
 }
 interface ProgressApi {
@@ -46,7 +48,7 @@ function flatten(items: MacroAction[], prefix: (string | number)[] = []): FlatRo
 }
 function render({ macro, run }: { macro: ProgressMacro | null | undefined; run: ProgressRun }): void {
   (document.querySelector('#macro-name') as HTMLElement).textContent = macro ? macro.name : '매크로 없음';
-  const status: string = run.status === 'RUNNING' ? `실행 중 · 반복 ${run.iteration || 0}/${run.iterations || 1}` : ({ STOPPED: '대기', PAUSED: '일시정지', ERROR: '실행 오류' } as Record<string, string>)[run.status] || run.status;
+  const status: string = run.status === 'RUNNING' ? `실행 중 · 반복 ${run.iteration || 0}/${run.iterations || 1}${run.attempt ? ` · 재시도 ${run.attempt}/${run.attempts ?? '?'}` : ''}` : ({ STOPPED: '대기', PAUSED: '일시정지', ERROR: '실행 오류' } as Record<string, string>)[run.status] || run.status;
   (document.querySelector('#run-status') as HTMLElement).textContent = status;
   const current: string | null = run.step ? run.step.join('.') : null;
   const list = document.querySelector('#steps') as HTMLElement;

@@ -47,3 +47,28 @@ test('move-only actions never report a click point', async () => {
   await input.execute({ type: 'mouse_move', x: 5, y: 6 }, {}, control);
   assert.equal(called, 0);
 });
+test('background click posts window messages without moving the cursor', async () => {
+  const { events, nativeAdapter } = fixture();
+  const posted: any[] = [];
+  (nativeAdapter as any).postMessage = (handle: any, msg: number, w: number, l: number) => { posted.push([handle, msg, w, l]); };
+  const { input } = (() => {
+    const windowAdapter = { prepareWindow: async () => { throw new Error('must not foreground'); }, prepareBackground: async () => ({ window: { handle: 7 }, region: {} }), screenPoint: (_region: any, x: number, y: number) => ({ x: x + 100, y: y + 200 }), clientPoint: (_region: any, x: number, y: number) => ({ x, y }) };
+    return { input: createInputAdapter({ nativeAdapter: nativeAdapter as unknown as NativeAdapter, windowAdapter: windowAdapter as unknown as WindowAdapter, keyboard: { releaseAll() {} } as unknown as KeyboardSender }) };
+  })();
+  const control = new RunControl(); const points: any[] = [];
+  control.onClickPoint = (point: any) => points.push(point);
+  await input.execute({ type: 'click', x: 30, y: 40, button: 'left' }, {}, control, 'background');
+  assert.deepEqual(posted.map(([h, msg]) => [h, msg]), [[7, 0x200], [7, 0x201], [7, 0x202]]);
+  assert.deepEqual(points, [{ x: 130, y: 240 }]);
+  assert.equal(events.length, 0);
+});
+test('background key input skips foreground checks', async () => {
+  const pressed: any[] = [];
+  const { nativeAdapter } = fixture();
+  (nativeAdapter as any).postMessage = () => {};
+  const windowAdapter = { prepareWindow: async () => { throw new Error('must not foreground'); }, prepareBackground: async () => ({ window: { handle: 7 }, region: {} }), screenPoint: (_region: any, x: number, y: number) => ({ x, y }), clientPoint: (_region: any, x: number, y: number) => ({ x, y }) };
+  const input = createInputAdapter({ nativeAdapter: nativeAdapter as unknown as NativeAdapter, windowAdapter: windowAdapter as unknown as WindowAdapter, keyboard: { press: async (...args: any[]) => { pressed.push(args); }, releaseAll() {} } as unknown as KeyboardSender });
+  (nativeAdapter as any).isForeground = () => false;
+  await input.execute({ type: 'key', keys: 'space' }, {}, new RunControl(), 'background');
+  assert.equal(pressed.length, 1); assert.equal(pressed[0][3], true);
+});

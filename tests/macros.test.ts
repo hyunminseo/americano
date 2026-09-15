@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateDocument, newMacro } from '../src/macros.js';
+import { validateDocument, newMacro, applyPerfTuning } from '../src/macros.js';
 
 const doc = (...macros: any[]): any => ({ version: 2, macros });
 test('normalizes hotkeys and rejects semantic duplicates and reserved keys', () => {
@@ -56,8 +56,29 @@ test('roi and threshold save instead of failing on range', () => {
   assert.equal(act({ threshold: 7 }).threshold, 1);
 });
 
+test('input mode defaults to foreground and keeps background', () => {
+  assert.equal(validateDocument(doc(newMacro())).macros[0].input_mode, 'foreground');
+  assert.equal(validateDocument(doc({ ...newMacro(), input_mode: 'background' })).macros[0].input_mode, 'background');
+  assert.equal(validateDocument(doc({ ...newMacro(), input_mode: 'sideways' })).macros[0].input_mode, 'foreground');
+});
+test('run stats validate leniently and tune only confident image steps', () => {
+  const region = { x: 0, y: 0, width: 100, height: 100 };
+  const base = { ...newMacro(), actions: [{ type: 'image_detect', image: 'a.png', region, poll_interval_ms: 100 }] };
+  const withStats = validateDocument(doc({ ...base, stats: { '0': { runs: 5, hits: 5, misses: 0, scans: 5, ms: 500, type: 'image_detect' }, broken: 42, '': { runs: 1 } } })).macros[0];
+  assert.deepEqual(Object.keys(withStats.stats), ['0']);
+  const tuned = applyPerfTuning(withStats);
+  assert.equal(tuned.macro.actions[0].poll_interval_ms, 200);
+  assert.equal(tuned.changes.length, 1);
+  const slow = validateDocument(doc({ ...base, stats: { '0': { runs: 4, hits: 4, misses: 0, scans: 100, ms: 9000, type: 'image_detect' } } })).macros[0];
+  const slowed = applyPerfTuning({ ...slow, actions: [{ ...slow.actions[0], poll_interval_ms: 1000 }] });
+  assert.equal(slowed.macro.actions[0].poll_interval_ms, 500);
+  // 타입이 바뀌면(구조 편집) 과거 통계로 조정하지 않는다.
+  const changed = applyPerfTuning({ ...withStats, actions: [{ type: 'key', keys: 'space' }] });
+  assert.equal(changed.changes.length, 0);
+});
+
 test('random wait defaults to 1–60 seconds and rejects reversed bounds',()=>{
   const action=validateDocument(doc({...newMacro(),actions:[{type:'random_wait'}]})).macros[0].actions[0];
- assert.equal(action.min_seconds,1);assert.equal(action.max_seconds,60);
+  assert.equal(action.min_seconds,1);assert.equal(action.max_seconds,60);
  for(const range of [{min_seconds:0,max_seconds:60},{min_seconds:61,max_seconds:60},{min_seconds:1,max_seconds:3601}]) assert.throws(()=>validateDocument(doc({...newMacro(),actions:[{type:'random_wait',...range}]})));
 });

@@ -33,3 +33,20 @@ test('focus change after pause prevents any keys reaching another window', async
   foreground = false; control.pause();
   await assert.rejects(pending, /전경/); assert.equal(sent, 0);
 });
+test('background press posts key messages without foreground checks', async () => {
+  const posted: any[] = [];
+  const keyboard = new KeyboardSender({ isForeground: () => false, sendKeyboard: () => 0, postMessage: (handle: any, msg: number, w: number, l: number) => { posted.push([handle, msg, w, l]); } });
+  await keyboard.press('ctrl+a', 7, new RunControl(), true);
+  assert.deepEqual(posted.map(([h, msg, w]) => [h, msg, w]), [[7, 0x100, 0xa2], [7, 0x100, 65], [7, 0x101, 65], [7, 0x101, 0xa2]]);
+  assert.equal(keyboard.backgroundHeld.length, 0);
+});
+test('background type posts WM_CHAR per code unit', async () => {
+  const posted: any[] = [];
+  const keyboard = new KeyboardSender({ isForeground: () => false, sendKeyboard: () => 0, postMessage: (handle: any, msg: number, w: number) => { posted.push([msg, w]); } });
+  await keyboard.type('가', 7, new RunControl(), true);
+  assert.deepEqual(posted, [[0x102, '가'.charCodeAt(0)]]);
+});
+test('background without postMessage support throws', async () => {
+  const keyboard = new KeyboardSender({ isForeground: () => true, sendKeyboard: () => 0 });
+  await assert.rejects(keyboard.press('a', 1, new RunControl(), true), /백그라운드/);
+});

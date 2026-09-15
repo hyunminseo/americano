@@ -80,3 +80,16 @@ test('learned positions persist alongside originals and survive stale editor sav
   await store.updateLearnedPosition(macro.id,'target.png',position,macro.target_window,macro.overlay);
   assert.equal(store.snapshot().macros[0].images[0].learned_region,null);
 });
+test('run stats accumulate per step and survive reopening', async (t: TestContext) => {
+  const {dir,store}=await setup(t);
+  const macro=newMacro();
+  await store.save({version:2,macros:[macro]});
+  await store.updateRunStats(macro.id,[{key:'6',type:'retry',scans:12,ms:1300,ok:true},{key:'6.0.then.0',type:'image_click',scans:1,ms:80,ok:true},{key:'',type:'x',scans:1,ms:1,ok:true}]);
+  await store.updateRunStats(macro.id,[{key:'6',type:'retry',scans:8,ms:900,ok:false}]);
+  const saved=store.snapshot().macros[0].stats;
+  assert.deepEqual(saved['6'],{runs:2,hits:1,misses:1,scans:20,ms:2200,type:'retry'});
+  assert.deepEqual(saved['6.0.then.0'],{runs:1,hits:1,misses:0,scans:1,ms:80,type:'image_click'});
+  assert.equal(saved[''],undefined);
+  const reopened=new MacroStore(dir,protector);await reopened.open();
+  assert.deepEqual(reopened.snapshot().macros[0].stats['6'].runs,2);
+});

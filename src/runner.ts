@@ -1,6 +1,6 @@
 import { randomUUID, randomInt } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { validateDocument, MacroAction, MacroDocument, TargetWindow } from './macros.js';
+import { validateDocument, MacroAction, MacroDocument, TargetWindow, StepStatEntry } from './macros.js';
 import { assertRunnable } from './portable.js';
 
 export class Cancelled extends Error {}
@@ -68,7 +68,7 @@ export interface TemplateMatch {
 }
 
 export interface InputAdapter {
-  execute(action: MacroAction, target: TargetWindow, control: RunControl): Promise<void>;
+  execute(action: MacroAction, target: TargetWindow, control: RunControl, mode?: string): Promise<void>;
   releaseAll(): Promise<void>;
 }
 
@@ -100,6 +100,9 @@ export class MacroRunner {
   active: ActiveRun | null = null;
   // 조건 분기가 마지막에 탄 가지. retry가 조건 분기를 감쌀 때 거짓이면 재시도한다.
   lastBranch: 'then' | 'else' | null = null;
+  // 실행 통계: 단계별 탐색 횟수·소요 시간·성패. runStats()로 읽고 자동 최적화에 쓴다.
+  stepStats: StepStatEntry[] = [];
+  scanCount = 0;
 
   constructor({ input = null, imageMatcher = null, authorize = async () => { throw new Error('실제 실행은 창·권한·라이선스 연결 후 사용할 수 있습니다.'); }, onState = () => {}, onClickPoint = null }: {
     input?: InputAdapter | null;
@@ -129,7 +132,10 @@ export class MacroRunner {
     if (this.onClickPoint) control.onClickPoint = this.onClickPoint;
     const active: ActiveRun = { control, done: null, macro };
     this.active = active;
-    this.publish({ status: 'RUNNING', runId: randomUUID(), macroId: macro.id, step: null, preview, error: null, outcome: null, matched: null, iteration: 0, iterations: macro.loop.count });
+    this.stepStats = [];
+    this.scanCount = 0;
+    this.lastBranch = null;
+    this.publish({ status: 'RUNNING', runId: randomUUID(), macroId: macro.id, step: null, preview, error: null, outcome: null, matched: null, iteration: 0, iterations: macro.loop.count, attempt: null, attempts: null });
     active.done = Promise.resolve().then(async () => {
       let outcome = 'completed';
       let failure: string | null = null;
@@ -147,12 +153,14 @@ export class MacroRunner {
         try { if (!preview && this.input) await this.input.releaseAll(); }
         catch (error) { outcome = 'failed'; failure = (error as Error).message; }
         this.active = null;
-        this.publish({ status: failure ? 'ERROR' : 'STOPPED', step: null, error: failure, outcome, completed: (this.current.completed as number) + (outcome === 'completed' ? 1 : 0) });
+        this.publish({ status: failure ? 'ERROR' : 'STOPPED', step: null, error: failure, outcome, completed: (this.current.completed as number) + (outcome === 'completed' ? 1 : 0), attempt: null, attempts: null });
       }
       return this.state();
     });
     return this.state();
   }
+
+  runStats(): StepStatEntry[] { return structuredClone(this.stepStats); }
 
   async execute(items: MacroAction[], control: RunControl, macro: MacroDocument, preview: boolean, prefix: unknown[], offset = 0): Promise<void> {
     for (let index = 0; index < items.length; index++) {
@@ -160,7 +168,14 @@ export class MacroRunner {
       if (!preview) { await this.authorize(macro); await control.checkpoint(); }
       const action = items[index];
       const step = [...prefix, index + offset];
-      this.publish({ step, wait_ms: null });
+      // 단계가 바뀌었을 때만 재시도 표시를 지운다. 같은 단계의 중첩 실행은 유지한다.
+      if (JSON.stringify(step) !== JSON.stringify(this.current.step)) this.publish({ step, wait_ms: null, attempt: null, attempts: null });
+      else this.publish({ step, wait_ms: null });
+      const statKey = step.map((part) => String(part)).join('.');
+      const statStart = control.time();
+      const scansBefore = this.scanCount;
+      let statOk = true;
+      try {
       if (action.type === 'stop') throw new Cancelled();
       if (action.type === 'random_wait') {
         const duration = randomInt((action.min_seconds as number) * 1000, (action.max_seconds as number) * 1000 + 1);
@@ -225,8 +240,11 @@ export class MacroRunner {
       }
       else if (action.type === 'retry') {
         let lastError: Error | undefined;
+        const total = (action.count as number) + 1;
         for (let attempt = 0; attempt <= (action.count as number); attempt += 1) {
           try {
+            // 재시도 중 진행 표시: 몇 번째 시도인지 계속 보여준다.
+            if (!preview) this.publish({ step, attempt: attempt + 1, attempts: total });
             if (preview) { await this.execute([action.action as MacroAction], control, macro, preview, step, 0); lastError = undefined; break; }
             this.lastBranch = null;
             await this.execute([action.action as MacroAction], control, macro, preview, step, 0);
@@ -257,6 +275,8 @@ export class MacroRunner {
       } else if (!preview) {
         await this.executeInput(action, control, macro);
       } else { await control.tick(0); }
+      } catch (error) { statOk = false; throw error; }
+      finally { this.stepStats.push({ key: statKey, type: action.type, scans: this.scanCount - scansBefore, ms: Math.max(0, control.time() - statStart), ok: statOk }); }
     }
   }
 
@@ -275,6 +295,7 @@ export class MacroRunner {
       wait: async (ms: number) => { await control.wait(Math.min(ms, Math.max(0, deadline - control.time()))); await searchControl.checkpoint(); },
     };
     const result = await this.imageMatcher(action, searchControl, macro);
+    this.scanCount += 1;
     await searchControl.checkpoint();
     this.publish({ matched: Boolean(result) });
     return result;
@@ -302,7 +323,7 @@ export class MacroRunner {
     const start = control.time();
     let settled = false;
     let timedOut = false;
-    const operation = Promise.resolve().then(() => (this.input as InputAdapter).execute(action, macro.target_window, control)).finally(() => { settled = true; });
+    const operation = Promise.resolve().then(() => (this.input as InputAdapter).execute(action, macro.target_window, control, (macro.input_mode as string) || 'foreground')).finally(() => { settled = true; });
     operation.catch(() => {});
     while (!settled) {
       if (control.time() - start >= (action.timeout_ms as number)) { timedOut = true; control.stop(); }

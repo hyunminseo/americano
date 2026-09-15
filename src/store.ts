@@ -155,6 +155,30 @@ export class MacroStore {
     });
   }
 
+  // 실행 통계 누적: 단계별 탐색 횟수·소요 시간·성패를 매크로에 저장한다.
+  // 자동 최적화(탐색 간격 조정)의 근거가 된다. 최대 200개 키를 유지한다.
+  updateRunStats(macroId: string, entries: { key: string; type: string; scans: number; ms: number; ok: boolean }[]): Promise<StoredDocument> {
+    return this.save(document => {
+      const macro = document.macros.find(m => m.id === macroId);
+      if (!macro) return document;
+      const stats = (macro.stats ?? {}) as Record<string, { runs: number; hits: number; misses: number; scans: number; ms: number; type?: string }>;
+      for (const entry of entries || []) {
+        if (!entry || typeof entry.key !== 'string' || !entry.key || entry.key.length > 64) continue;
+        const record = stats[entry.key] ?? { runs: 0, hits: 0, misses: 0, scans: 0, ms: 0 };
+        record.runs += 1;
+        if (entry.ok) record.hits += 1; else record.misses += 1;
+        record.scans += Math.max(0, entry.scans || 0);
+        record.ms += Math.max(0, entry.ms || 0);
+        if (typeof entry.type === 'string' && entry.type) record.type = entry.type.slice(0, 32);
+        stats[entry.key] = record;
+      }
+      const keys = Object.keys(stats);
+      if (keys.length > 200) for (const extra of keys.slice(0, keys.length - 200)) delete stats[extra];
+      macro.stats = stats;
+      return document;
+    });
+  }
+
   save(raw: StoredDocument | ((snapshot: StoredDocument) => StoredDocument)): Promise<StoredDocument> {
     const snapshot = typeof raw === 'function' ? null : validateDocument(raw) as StoredDocument;
     const job = this.queue.then(async () => {
