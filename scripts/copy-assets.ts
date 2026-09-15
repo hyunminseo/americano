@@ -29,7 +29,7 @@ if (fs.existsSync(path.join(root, 'artifacts'))) copyDir('artifacts');
 fs.copyFileSync(path.join(root, 'package.json'), path.join(root, 'compiled', 'package.json'));
 // TS 7은 일반 스크립트에도 CJS 헤더를 붙인다. 브라우저가 고전 스크립트로
 // 읽는 파일에서는 exports가 없어 터지므로 헤더를 벗겨낸다.
-const BROWSER_SCRIPTS = ['renderer.js', 'preload.js', 'overlay-preload.js', 'progress-preload.js', 'capture-overlay.js', 'progress.js'];
+const BROWSER_SCRIPTS = ['renderer.js', 'simple.js', 'preload.js', 'overlay-preload.js', 'progress-preload.js', 'capture-overlay.js', 'progress.js'];
 const header = '"use strict";\nObject.defineProperty(exports, "__esModule", { value: true });\n';
 for (const file of BROWSER_SCRIPTS) {
   const target = path.join(out, file);

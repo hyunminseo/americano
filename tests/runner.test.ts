@@ -200,7 +200,7 @@ test('retry publishes attempt progress and collects run stats', async () => {
 });
 test('random wait samples within its bounds on each execution and supports stop',async()=>{
  const runner=new MacroRunner();const waits: number[]=[];
- const control={checkpoint:async()=>{},wait:async (ms: number)=>waits.push(ms)};
+ const control={checkpoint:async()=>{},time:()=>0,wait:async (ms: number)=>waits.push(ms)};
   for(let i=0;i<20;i++) await runner.execute([{type:'random_wait',min_seconds:1,max_seconds:60}],control as unknown as RunControl,{} as unknown as Parameters<MacroRunner['execute']>[2],true,[]);
  assert.equal(waits.length,20);assert(waits.every((ms: number)=>Number.isInteger(ms)&&ms>=1000&&ms<=60000));
   await runner.execute([{type:'random_wait',min_seconds:3,max_seconds:3}],control as unknown as RunControl,{} as unknown as Parameters<MacroRunner['execute']>[2],true,[]);

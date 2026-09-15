@@ -27,11 +27,11 @@ if errorlevel 1 goto :failed
 echo [2/2] Building Electron application...
 call npm.cmd run build
 if errorlevel 1 goto :failed
-if not exist "%~dp0dist\Americano-Portable.exe" goto :failed
+if not exist "%~dp0dist\americano.exe" goto :failed
 
 echo.
 echo Build completed successfully.
-echo Run: "%~dp0dist\Americano-Portable.exe"
+echo Run: "%~dp0dist\americano.exe"
 echo Distribute this EXE only. No installation or config file is required.
 exit /b 0
 

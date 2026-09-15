@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-const commands = new Set<string>(['state', 'save', 'preview', 'start', 'pause', 'stop', 'license-import', 'license-check', 'license-device', 'image-select', 'image-delete', 'window-list', 'capture-overlay-open', 'overlay-show', 'overlay-hide', 'macro-import', 'macro-export', 'overlay-rebind', 'overlay-auto', 'progress-toggle', 'learn-reset', 'ai-get', 'ai-set', 'ai-test', 'ai-generate', 'ai-server', 'ai-server-start', 'ai-providers', 'ai-login-start', 'ai-login-poll', 'ai-login-finish', 'ai-key-set']);
+const commands = new Set<string>(['state', 'save', 'preview', 'start', 'pause', 'stop', 'admin-open', 'simple-open', 'license-import', 'license-check', 'license-device', 'image-select', 'image-delete', 'window-list', 'capture-overlay-open', 'overlay-show', 'overlay-hide', 'macro-import', 'macro-export', 'overlay-rebind', 'overlay-auto', 'progress-toggle', 'learn-reset', 'ai-get', 'ai-set', 'ai-test', 'ai-generate', 'ai-server', 'ai-server-start', 'ai-providers', 'ai-login-start', 'ai-login-poll', 'ai-login-finish', 'ai-key-set']);
 contextBridge.exposeInMainWorld('americano', {
   request: (command: string, payload: unknown = {}): Promise<unknown> => {
     if (!commands.has(command)) return Promise.reject(new Error('허용되지 않은 명령입니다.'));

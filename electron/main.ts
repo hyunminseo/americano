@@ -161,7 +161,10 @@ let f7Ready = false;
 let quitting = false;
 let shutdownPromise: Promise<boolean> | null = null;
 const shutdownDeadlineMs = 5000;
-const page = pathToFileURL(path.join(__dirname, 'index.html')).href;
+const adminPage = pathToFileURL(path.join(__dirname, 'index.html')).href;
+const simplePage = pathToFileURL(path.join(__dirname, 'simple.html')).href;
+const page = adminPage;
+const allowedPages = new Set([adminPage, simplePage]);
 
 interface BackendState {
   document: { version: 2; macros: MacroDocument[] };
@@ -216,7 +219,8 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.on('closed', () => { if (!quitting) app.quit(); });
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
-  mainWindow.loadURL(page);
+  // 기본은 비개발자용 심플 화면. --admin 실행 시 전체 편집 화면을 연다.
+  mainWindow.loadURL(process.argv.includes('--admin') ? adminPage : simplePage);
 }
 
 async function openCaptureOverlay(payload: { mode?: string; macro: Record<string, unknown> }): Promise<void> {
@@ -605,10 +609,18 @@ else {
     if (!shortcutsReady) startupError = [startupError, 'F8/F9 등록에 실패했습니다. 다른 앱의 단축키 설정을 확인하세요.'].filter(Boolean).join('\n');
     ipcMain.handle('backend:request', async (event: IpcMainInvokeEvent, command: string, payload: Record<string, unknown> = {}) => {
       try {
-        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== page) throw new Error('허용되지 않은 요청입니다.');
+        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame || !allowedPages.has(event.senderFrame.url)) throw new Error('허용되지 않은 요청입니다.');
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('잘못된 요청입니다.');
         switch (command) {
           case 'state': break;
+          case 'admin-open': {
+            if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(adminPage);
+            return { ok: true, state: state() };
+          }
+          case 'simple-open': {
+            if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(simplePage);
+            return { ok: true, state: state() };
+          }
           case 'macro-export': {
             const macro = (store as MacroStore).snapshot().macros.find(item => item.id === payload.macroId);
             if (!macro) throw new Error('매크로를 찾을 수 없습니다.');

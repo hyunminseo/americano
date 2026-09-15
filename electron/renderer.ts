@@ -1378,6 +1378,8 @@ function createMacro(): void {
 (($('#pause-button') as HTMLButtonElement)).onclick = () => request('pause');
 (($('#stop-button') as HTMLButtonElement)).onclick = () => request('stop');
 window.americano.onStartHotkey(startSelected);
+const simpleBack = document.querySelector('#simple-open-button') as HTMLButtonElement | null;
+if (simpleBack) simpleBack.onclick = () => request('simple-open');
 (($('#license-import') as HTMLButtonElement)).onclick = () => request('license-import');
 (($('#license-check') as HTMLButtonElement)).onclick = async () => { const state = await request('license-check'); if (state) log('실행 권한 확인 성공: 서명, MAC, 유효기간, 기능 권한이 모두 유효합니다. 실제 입력은 수행하지 않았습니다.'); };
 (($('#license-device-button') as HTMLButtonElement)).onclick = async () => {

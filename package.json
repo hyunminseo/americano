@@ -37,7 +37,7 @@
   },
   "build": {
     "appId": "com.americano.automation",
-    "productName": "Americano",
+    "productName": "Americano simple",
     "asar": true,
     "files": [
       "compiled/electron/**/*",
@@ -65,7 +65,7 @@
       "target": "portable"
     },
     "portable": {
-      "artifactName": "Americano-Portable.exe"
+      "artifactName": "americano.exe"
     }
   }
 }
