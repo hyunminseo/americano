@@ -85,6 +85,18 @@ test('click point hook is attached to the run control when provided', async () =
   assert.equal(runner.state().outcome, 'completed');
   assert.deepEqual(seen, { x: 1, y: 2 });
 });
+test('nested condition in the false branch does not end the outer retry', async () => {
+  const pressed: any[] = [];
+  const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async (action: any) => (action.image === 'boss.png' ? { x: 0, y: 0, width: 10, height: 10, score: 1 } : null), input: {
+    execute: async (action: any) => { pressed.push(action.keys); }, releaseAll: async () => {},
+  } });
+  const region = { x: 0, y: 0, width: 100, height: 100 };
+  const inner = { type: 'condition', test: { type: 'image_detect', image: 'boss.png', region }, then: [{ type: 'key', keys: 'space' }], else: [] };
+  runner.start(macro([{ type: 'retry', count: 2, interval_ms: 0, action: { type: 'condition', test: { type: 'image_detect', image: 'target.png', region }, then: [{ type: 'key', keys: 'enter' }], else: [inner] } }]));
+  await runner.active!.done;
+  assert.equal(runner.state().status, 'ERROR');
+  assert.deepEqual(pressed, ['space', 'space', 'space']);
+});
 test('retry around a condition loops back to discovery on the false branch', async () => {
   let scans = 0; const inputs: any[] = [];
   const runner = new MacroRunner({ authorize: async () => {}, imageMatcher: async () => (++scans >= 3 ? { x: 0, y: 0, width: 10, height: 10, score: 1 } : null), input: {
@@ -137,11 +149,11 @@ test('stop cancels the interval before another loop can run', async () => {
   assert.equal(scans,1); assert.equal(runner.state().outcome,'cancelled');
 });
 
-test('image scan timeout prevents a matching branch from running', async () => {
+test('image scan timeout becomes a clean miss instead of crashing the run', async () => {
   let inputs=0;
   const runner=new MacroRunner({authorize:async()=>{},imageMatcher:async(_action: any,control: any)=>{while(true){await sleep(2);await control.checkpoint();}},input:{execute:async()=>{inputs++;},releaseAll:async()=>{}}});
   runner.start(macro([{type:'condition',test:{type:'image_detect',image:'a',timeout_ms:10},then:[{type:'key',keys:'enter'}],else:[]}]))
-  await runner.active!.done;assert.equal(inputs,0);assert.match(runner.state().error as string,/timeout/);
+  await runner.active!.done;assert.equal(inputs,0);assert.equal(runner.state().outcome,'completed');
 });
 test('smart click verifies screen change after the center click', async () => {
   const inputs: any[] = []; let calls = 0;

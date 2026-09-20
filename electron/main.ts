@@ -580,9 +580,12 @@ else {
       if (won.asset) {
         const position = { x: area.x + match.x, y: area.y + match.y, width: match.width, height: match.height };
         // 1차 수행이 성공하면 적중 위치와 배율을 학습해 다음 실행을 안정화·가속한다.
+        // 학습 저장 실패는 매칭 성공을 막지 않는다.
         const roi = learnRoi(won.asset.learned_roi ?? null, position, area);
         const factor = action.pyramid ? ((match as NccMatch).scaleFactor ?? 1) : null;
-        await (store as MacroStore).updateLearnedMatch(macro.id, won.path, { region: position, roi, scaleFactor: factor }, macro.target_window, macro.overlay);
+        try {
+          await (store as MacroStore).updateLearnedMatch(macro.id, won.path, { region: position, roi, scaleFactor: factor }, macro.target_window, macro.overlay);
+        } catch { /* 저장소 오류는 다음 저장 때 드러난다. */ }
         won.asset.learned_region = position;
         won.asset.learned_roi = roi;
         if (factor) won.asset.learned_scale_factor = factor;

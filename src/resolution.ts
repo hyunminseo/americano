@@ -45,16 +45,17 @@ export function resolveScale(current: Region, reference?: Region | null): Scale 
 }
 
 // 수동 배율(base, %)에 해상도 배율을 곱한 실효 템플릿 배율을 구한다.
-// 반올림 오차는 최대 0.5%로, 측정된 허용 band(±2% 이상) 안에 들어간다.
+// 정수% 반올림은 최대 0.8% 오차로 작은 템플릿 상관을 깨뜨리므로 소수 첫째자리까지 유지한다.
 export function effectivePercent(base: number, scale: Scale): number | { x: number; y: number } {
   if (!Number.isInteger(base) || base < MIN_PERCENT || base > MAX_PERCENT) throw new Error('기준 이미지 배율은 25~400%입니다.');
-  const px = Math.round(base * scale.sx);
-  const py = Math.round(base * scale.sy);
+  const round1 = (value: number): number => Math.round(value * 10) / 10;
+  const px = round1(base * scale.sx);
+  const py = round1(base * scale.sy);
   const entries: Array<[string, number]> = [['x', px], ['y', py]];
   for (const [key, value] of entries) {
     if (value < MIN_PERCENT || value > MAX_PERCENT) throw new Error(`현재 해상도가 기준과 너무 다릅니다. 이미지를 다시 캡처하세요. (필요 배율 ${key}: ${value}%)`);
   }
-  return scale.uniform ? Math.round((px + py) / 2) : { x: px, y: py };
+  return scale.uniform ? round1((px + py) / 2) : { x: px, y: py };
 }
 
 // 기준 오버레이 좌표계의 rect를 현재 오버레이 좌표계로 옮긴다.

@@ -15,7 +15,7 @@ test('동일 종횡비에서는 균일 배율 0.625가 계산된다', () => {
   assert.equal(scale.uniform, true);
   assert.equal(scale.sx, 0.625);
   assert.equal(scale.sy, 0.625);
-  assert.equal(effectivePercent(100, scale), 63);
+  assert.equal(effectivePercent(100, scale), 62.5);
   const noRef = resolveScale(SMALL, null);
   assert.deepEqual([noRef.sx, noRef.sy, noRef.estimated], [1, 1, false]);
 });
@@ -24,7 +24,7 @@ test('종횡비가 다르면 비균일로 판정한다', () => {
   const wide = resolveScale({ x: 0, y: 0, width: 1706, height: 1066 }, REF);
   assert.equal(wide.uniform, false);
   const percent = effectivePercent(100, wide);
-  assert.deepEqual(percent, { x: 133, y: 111 });
+  assert.deepEqual(percent, { x: 133.3, y: 111 });
   assert.throws(() => effectivePercent(100, { sx: 0.1, sy: 0.1, uniform: true, estimated: true }), /너무 다릅니다/);
 });
 
@@ -93,4 +93,16 @@ test('800x600 합성 장면에서 자동 배율로 탐지된다', async () => {
   const zoned = await findZoned(frame, template, area, 0, 0.9, null, hint, null);
   assert(zoned, '힌트에서 찾지 못했습니다.');
   assert(Math.abs(zoned.x + zoned.width / 2 - 402.5) <= 5);
+});
+
+test('소수점 배율이 정수 반올림보다 정확하다', async () => {
+  const dir = path.join(__dirname, 'test_images');
+  const frame = await sharp(path.join(dir, 'background1.png')).resize(800, 600).png().toBuffer();
+  const exact = await scaleTemplate(path.join(dir, 'target1.png'), 62.5);
+  const rounded = await scaleTemplate(path.join(dir, 'target1.png'), 63);
+  const good = await findCoarseToFine(frame, exact, 0.0, null);
+  const rough = await findCoarseToFine(frame, rounded, 0.0, null);
+  assert(good && rough, '기준 매치를 찾지 못했습니다.');
+  // 선형 합성에서는 동등 수준이어야 한다(회귀 없음). 실템플릿 이득은 측정 스크립트로 확인.
+  assert(Math.abs(good.score - rough.score) <= 0.02, `배율별 점수 차이 과다: ${good.score} vs ${rough.score}`);
 });

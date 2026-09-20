@@ -75,7 +75,9 @@ export async function findCoarseToFine(framePng: string | Buffer, templateSource
   }
   const preprocess = options.preprocess === 'normalize' ? 'normalize' : 'none';
   const template = await loadTemplate(templateSource, { preprocess });
-  const useHalf = frameWidth > 320 && templateWidth > 32 && templateHeight > 16;
+  // 절반 해상도 선탐색은 큰 템플릿의 속도용이다. 얇은 템플릿(높이 32 미만 등)은
+  // 축소 과정에서 선이 뭉개져 절반 해상도에서 절대 못 찾으므로 원본으로 직접 찾는다.
+  const useHalf = frameWidth > 320 && templateWidth >= 64 && templateHeight >= 32;
   let match: NccMatch | null = null;
   if (!useHalf) {
     const frame = await greyRaw(framePng, preprocess);
@@ -116,7 +118,10 @@ export async function findCoarseToFine(framePng: string | Buffer, templateSource
   }
   if (match && match.score < threshold + CONSENSUS_BAND) {
     const frame = await greyRaw(framePng, preprocess);
-    const verdict = blockConsensus(frame, template, match.x, match.y, threshold);
+    // 작은 템플릿은 4x4 조각이 통계적으로 무의미해져 진짜를 탈락시키므로 격자를 줄인다.
+    const area = template.info.width * template.info.height;
+    const grid = area >= 96 * 96 ? 4 : area >= 40 * 40 ? 3 : 2;
+    const verdict = blockConsensus(frame, template, match.x, match.y, threshold, grid);
     if (verdict.ratio < CONSENSUS_RATIO || verdict.mean < threshold - 0.1) return null;
   }
   return match;
@@ -248,7 +253,7 @@ export async function scaleTemplate(source: string | Buffer, percent: number | {
   if (percent !== null && typeof percent === 'object') { px = percent.x ?? 100; py = percent.y ?? 100; }
   else { px = percent; py = percent; }
   for (const value of [px, py]) {
-    if (!Number.isInteger(value) || value < 25 || value > 400) throw new Error('기준 이미지 배율은 25~400%입니다.');
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 25 || value > 400) throw new Error('기준 이미지 배율은 25~400%입니다.');
   }
   if (px === 100 && py === 100) return source;
   const meta = await sharp(source).metadata();

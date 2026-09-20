@@ -79,6 +79,8 @@ test('template scaling adjusts dimensions without altering the source',async()=>
  assert.equal(await scaleTemplate(source,100),source);
  const resized=await scaleTemplate(source,150);const meta=await sharp(resized).metadata();
  assert.deepEqual([meta.width,meta.height],[30,15]);
+ const fractional=await scaleTemplate(source,62.5);const fmeta=await sharp(fractional).metadata();
+ assert.deepEqual([fmeta.width,fmeta.height],[13,6]);
  const frame=await sharp({create:{width:60,height:40,channels:3,background:'black'}}).composite([{input:resized,left:15,top:12}]).png().toBuffer();
   const match=await findCoarseToFine(frame,resized,1,null);assert.deepEqual([match!.x,match!.y,match!.width,match!.height],[15,12,30,15]);
  await assert.rejects(scaleTemplate(source,0),/25~400/);

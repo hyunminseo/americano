@@ -241,20 +241,26 @@ export class MacroRunner {
       else if (action.type === 'retry') {
         let lastError: Error | undefined;
         const total = (action.count as number) + 1;
+        const nested = action.action as MacroAction;
         for (let attempt = 0; attempt <= (action.count as number); attempt += 1) {
           try {
             // 재시도 중 진행 표시: 몇 번째 시도인지 계속 보여준다.
             if (!preview) this.publish({ step, attempt: attempt + 1, attempts: total });
-            if (preview) { await this.execute([action.action as MacroAction], control, macro, preview, step, 0); lastError = undefined; break; }
-            this.lastBranch = null;
-            await this.execute([action.action as MacroAction], control, macro, preview, step, 0);
+            if (preview) { await this.execute([nested], control, macro, preview, step, 0); lastError = undefined; break; }
             // 조건 분기를 감싸면 거짓 가지를 실패로 간주한다. 대기 후 다시 발견으로 돌아간다.
-            if ((action.action as MacroAction).type === 'condition' && this.lastBranch === 'else') {
-              lastError = new Error('이미지를 찾지 못했습니다. 다시 확인합니다.');
-              if (attempt === (action.count as number)) throw lastError;
-              await control.wait(action.interval_ms as number);
-              continue;
+            // 안쪽에 또 조건 분기가 있어도 바깥 판정만 본다 (반환값 사용).
+            if (nested.type === 'condition') {
+              const matched = await this.runCondition(nested, control, macro, preview, step);
+              if (!matched) {
+                lastError = new Error('이미지를 찾지 못했습니다. 다시 확인합니다.');
+                if (attempt === (action.count as number)) throw lastError;
+                await control.wait(action.interval_ms as number);
+                continue;
+              }
+              lastError = undefined; break;
             }
+            this.lastBranch = null;
+            await this.execute([nested], control, macro, preview, step, 0);
             lastError = undefined; break;
           }
           catch (error) { lastError = error as Error; if (control.abort.signal.aborted || attempt === (action.count as number)) throw error; await control.wait(action.interval_ms as number); }
@@ -262,9 +268,7 @@ export class MacroRunner {
         if (lastError) throw lastError;
       }
       else if (action.type === 'condition') {
-        const matched = preview ? false : Boolean(await this.findImage(action.test as MacroAction, control));
-        this.lastBranch = matched ? 'then' : 'else';
-        await this.execute(matched ? action.then as MacroAction[] : action.else as MacroAction[], control, macro, preview, [...step, matched ? 'then' : 'else'], 0);
+        await this.runCondition(action, control, macro, preview, step);
       }
       else if (action.type === 'repeat') {
         for (let count = 0; count < (action.count as number); count++) {
@@ -280,8 +284,16 @@ export class MacroRunner {
     }
   }
 
+  async runCondition(action: MacroAction, control: RunControl, macro: MacroDocument, preview: boolean, step: unknown[]): Promise<boolean> {
+    const matched = preview ? false : Boolean(await this.findImage(action.test as MacroAction, control));
+    this.lastBranch = matched ? 'then' : 'else';
+    await this.execute(matched ? action.then as MacroAction[] : action.else as MacroAction[], control, macro, preview, [...step, matched ? 'then' : 'else'], 0);
+    return matched;
+  }
+
   async findImage(action: MacroAction, control: RunControl): Promise<TemplateMatch | null> {
-    if (!this.imageMatcher) throw new Error('이미지 캡처 어댑터가 준비되지 않았습니다.');
+    const matcher = this.imageMatcher;
+    if (!matcher) throw new Error('이미지 캡처 어댑터가 준비되지 않았습니다.');
     await control.checkpoint();
     const macro = this.active?.macro as MacroDocument;
     const deadline = control.time() + (action.timeout_ms as number);
@@ -294,9 +306,25 @@ export class MacroRunner {
       },
       wait: async (ms: number) => { await control.wait(Math.min(ms, Math.max(0, deadline - control.time()))); await searchControl.checkpoint(); },
     };
-    const result = await this.imageMatcher(action, searchControl, macro);
+    const result = await (async () => {
+      try {
+        return await matcher(action, searchControl, macro);
+      } catch (error) {
+        // 스윕이 제한을 넘기면 크래시 대신 못 찾음으로 돌린다. 재시도·대기가 정상 동작한다.
+        // 중단(Cancelled)·실패는 그대로 던진다.
+        if (error instanceof Cancelled || control.failure) throw error;
+        if ((error as Error).message === '이미지 검색 timeout을 초과했습니다.') return null;
+        throw error;
+      }
+    })();
     this.scanCount += 1;
-    await searchControl.checkpoint();
+    try {
+      await searchControl.checkpoint();
+    } catch (error) {
+      // 제한 초과는 못 찾음으로 돌린다. 찾았는데 제한이 지났으면 찾은 것을 쓴다.
+      if ((error as Error).message === '이미지 검색 timeout을 초과했습니다.') return result;
+      throw error;
+    }
     this.publish({ matched: Boolean(result) });
     return result;
   }
