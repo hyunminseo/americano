@@ -38,7 +38,7 @@ async function findCoarseToFine(framePng, templateSource, threshold, control) {
   const crop = await sharp(framePng).extract({ left, top, width, height })
     .removeAlpha().greyscale().raw().toBuffer({ resolveWithObject: true });
   const refined = await findTemplate(crop, template, threshold, control);
-  if (!refined) return { ...coarse, width: templateMeta.width, height: templateMeta.height, score: candidate.score };
+  if (!refined) return null;
   return { x: left + refined.x, y: top + refined.y, width: templateMeta.width, height: templateMeta.height, score: refined.score };
 }
 
@@ -62,7 +62,7 @@ async function searchWindow(framePng, area, window, templateSource, threshold, c
     .png().toBuffer();
   const match = await findCoarseToFine(windowPng, templateSource, threshold, control);
   if (!match) return null;
-  return { ...match, x: window.x + match.x, y: window.y + match.y };
+  return { ...match, x: window.x - area.x + match.x, y: window.y - area.y + match.y };
 }
 // 캡처했던 위치를 가장 먼저 뒤진다. UI가 그대로면 수십 ms 안에 끝난다.
 // home은 캡처 당시 client 좌표이며 area와 같은 좌표계여야 한다.

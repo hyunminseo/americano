@@ -82,6 +82,7 @@ async function exportMacro(raw, store) {
   macro.images = macro.images.map(asset => ({ ...asset, path: references.get(asset.path), preview: '' }));
   // Machine-specific executable paths and shortcuts must not bind another PC silently.
   delete macro.target_window.executable_path;
+  delete macro.target_window.viewport;
   macro.hotkey = ''; macro.enabled = false;
   macro.binding = { needs_overlay: true, needs_review: needsReview, source_overlay: macro.overlay || macro.binding?.source_overlay || null };
   const bytes = Buffer.from(JSON.stringify({ format: 'americano-macro', version: 1, macro, assets }));

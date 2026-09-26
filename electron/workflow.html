@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>Americano · Workflow Studio</title><link rel="stylesheet" href="workflow.css"></head>
+<body>
+<aside class="rail"><a class="brand" href="#" aria-label="Americano">a<span>·</span></a><button class="rail-active" title="워크플로우">⌘</button><button id="import" title="워크플로우 가져오기">↥</button><button id="license" title="라이선스">♧</button><span class="rail-bottom">AM</span></aside>
+<main>
+<header><div class="breadcrumb">WORKSPACE <span>/</span> <b>나의 워크플로우</b></div><div class="header-right"><span class="local-dot"></span> 로컬에서 실행 <button id="export">내보내기 ↗</button></div></header>
+<section class="titlebar"><div><div class="eyebrow">AMERICANO STUDIO</div><div class="title-row"><select id="workflows" aria-label="워크플로우 선택"></select><button id="new" title="새 워크플로우">＋</button><button id="rename" title="이름 변경">✎</button></div></div><div class="title-actions"><span id="saved">저장됨</span><button id="save">저장</button><button id="preview">▷ 흐름 미리보기</button><button class="primary" id="run">▶ 실행 <kbd>F7</kbd></button><button id="pause">Ⅱ <kbd>F8</kbd></button><button id="stop" class="stop">■ <kbd>F9</kbd></button></div></section>
+<nav class="tabs"><button class="active" id="editor-tab">워크플로우</button><button id="history-tab">실행 기록 <span id="log-count">0</span></button><span class="compat">↔ 800 × 600 / 1280 × 960</span></nav>
+<div id="notice" role="status" aria-live="polite"></div>
+<div class="workspace">
+<aside class="library"><div class="section-title">노드 라이브러리 <span>＋</span></div><p>추가하고 연결해 흐름을 만드세요.</p><input id="search" placeholder="노드 검색…" aria-label="노드 검색"><div id="palette"></div><div class="library-note"><b>하나의 매크로, 두 해상도</b><p>기준 해상도로 작성하면 화면 크기에 맞춰 이미지와 클릭 좌표를 변환합니다.</p><span>Windows + macOS</span></div></aside>
+<section class="canvas-wrap"><div id="canvas" tabindex="0" aria-label="워크플로우 캔버스"><div id="world"><svg id="edges" width="12000" height="8000"></svg><div id="nodes"></div></div></div><div class="canvas-hint" id="hint">출력 ● → 입력 ● 연결 · 배경 드래그로 이동</div><div class="canvas-tools"><button id="zoom-out" title="축소">−</button><span id="zoom">100%</span><button id="zoom-in" title="확대">＋</button><i></i><button id="fit" title="전체 보기">⛶</button><button id="undo" title="실행 취소">↶</button><button id="redo" title="다시 실행">↷</button></div><div id="empty" hidden>첫 노드를 추가해 보세요.</div><section id="history" hidden><h2>실행 기록</h2><p>미리보기는 실제 입력 없이 흐름을 점검하며, 이미지 분기는 ‘없음’ 경로를 사용합니다.</p><div id="events"></div></section></section>
+<aside class="inspector"><div class="section-title" id="inspector-title">워크플로우 설정</div><div id="inspector"></div></aside>
+</div><footer><span id="status">연결 중…</span><span>F8 일시정지 · F9 즉시 중지</span></footer>
+</main>
+<dialog id="name-dialog"><form method="dialog"><h2>워크플로우 이름</h2><input id="name-input" required maxlength="100"><div><button value="cancel" formnovalidate>취소</button><button value="ok" class="primary">확인</button></div></form></dialog>
+<dialog id="license-dialog"><h2>라이선스 및 실행 권한</h2><p id="license-info"></p><button id="license-import">라이선스 등록</button><button id="license-close">닫기</button></dialog>
+<script src="../src/workflow.js"></script><script src="workflow-renderer.js"></script></body></html>

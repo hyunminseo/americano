@@ -1,4 +1,6 @@
 const { randomUUID } = require('node:crypto');
+const { validate: validateWorkflow } = require('./workflow');
+const { validateReference } = require('./resolution');
 const { parseScript } = require('./uo-script/parser');
 class MacroError extends Error {}
 const fail = (message) => { throw new MacroError(message); };
@@ -27,7 +29,7 @@ function imageAction(item, base) {
   return { ...base, image: string(item.image, 'image', 2048), monitor: integer(item.monitor ?? 1, 'monitor', 1, 16), threshold: number(item.threshold ?? 0.9, 'threshold', 0, 1), zone: integer(item.zone ?? 0, 'zone', 0, 9), region: region(item.region), poll_interval_ms: integer(item.poll_interval_ms ?? 100, 'poll_interval_ms', 30, 60000) };
 }
 const modifiers = ['ctrl', 'alt', 'shift', 'win'];
-const aliases = { control: 'ctrl', commandorcontrol: 'ctrl', super: 'win', meta: 'win', escape: 'esc' };
+const aliases = { cmd: 'win', command: 'win', control: 'ctrl', commandorcontrol: 'ctrl', super: 'win', meta: 'win', escape: 'esc' };
 function keys(value) {
   const parts = string(value, 'keys', 100).toLowerCase().split('+').map((part) => {
     const name = part.trim(); return aliases[name] || name;
@@ -106,6 +108,7 @@ function validateDocument(raw) {
     for (const field of ['process_name', 'executable_path', 'title_contains']) {
       if (target[field] !== undefined) target_window[field] = string(target[field], field, 1024).trim();
     }
+    if (target.viewport != null) target_window.viewport = region(target.viewport, 'target_window.viewport');
     const script = string(item.script ?? '', 'script', 50000);
     if (script) {
       try { parseScript(script); } catch (error) { fail(`script: ${error.message}`); }
@@ -113,7 +116,7 @@ function validateDocument(raw) {
     if (Array.isArray(item.images) && item.images.length > 200) fail('이미지 자산은 최대 200개입니다.');
     const images = Array.isArray(item.images) ? item.images.map((image) => {
       if (!image || typeof image !== 'object') fail('이미지 자산이 잘못되었습니다.');
-      return { id: string(image.id, 'image.id', 64), name: string(image.name, 'image.name', 200).trim(), path: string(image.path, 'image.path', 4096), preview: string(image.preview ?? '', 'image.preview', 2000000), region: region(image.region, 'image.region') };
+      return { reference_width: image.reference_width == null ? null : integer(image.reference_width, 'image.reference_width', 1, 100000), id: string(image.id, 'image.id', 64), name: string(image.name, 'image.name', 200).trim(), path: string(image.path, 'image.path', 4096), preview: string(image.preview ?? '', 'image.preview', 2000000), region: region(image.region, 'image.region') };
     }) : [];
     const overlay = item.overlay == null ? null : region(item.overlay, 'overlay');
     const loop = { count: integer(item.loop?.count ?? 1, 'loop.count', 1, 10000), interval_ms: integer(item.loop?.interval_ms ?? 500, 'loop.interval_ms', 30, 60000) };
@@ -122,7 +125,9 @@ function validateDocument(raw) {
       needs_review: item.binding.needs_review === true,
       source_overlay: item.binding.source_overlay == null ? null : region(item.binding.source_overlay, 'binding.source_overlay'),
     };
-    return { id, name, description: string(item.description ?? '', 'description', 2000), script, enabled: item.enabled, hotkey, target_window, overlay, loop, images, actions: actions(item.actions), binding };
+    const workflow = item.workflow ? validateWorkflow(item.workflow, actions) : null;
+    const reference = item.reference ? validateReference(item.reference) : null;
+    return { workflow, reference, id, name, description: string(item.description ?? '', 'description', 2000), script, enabled: item.enabled, hotkey, target_window, overlay, loop, images, actions: workflow ? workflow.nodes.filter(n => n.action).map(n => n.action) : actions(item.actions), binding };
   }), global: { pause_hotkey: 'f8', stop_hotkey: 'f9', default_timeout_ms: 10000 } };
 }
 function newMacro() {

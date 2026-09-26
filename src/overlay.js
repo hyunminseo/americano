@@ -9,9 +9,9 @@ function physicalRegion(client, area) {
   if (result.width < 1 || result.height < 1 || result.x < client.x || result.y < client.y || result.x + result.width > client.x + client.width || result.y + result.height > client.y + client.height) throw new Error('오버레이 영역이 현재 대상 창을 벗어났습니다. 영역을 다시 설정하세요.');
   return result;
 }
-async function captureTarget(target, area, control) {
+async function captureTarget(target, area, control, reference) {
   const prepared = await prepareWindow(target, control);
-  const region = physicalRegion(prepared.region, area);
+  const region = reference && area ? require('./resolution').transform(prepared.region, reference).region(area) : physicalRegion(prepared.region, area);
   if (control) await control.checkpoint();
   const image = await (await screen.grabRegion(new Region(region.x, region.y, region.width, region.height))).toRGB();
   const buffer = await sharp(image.data, { raw: { width: image.width, height: image.height, channels: image.channels } }).png().toBuffer();

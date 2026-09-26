@@ -36,18 +36,20 @@ class MacroRunner {
     if (this.active) throw new Error('이미 실행 또는 정리 중인 매크로가 있습니다.');
     const macro = validateDocument({ version: 2, macros: [raw] }).macros[0];
     if (!preview) assertRunnable(macro);
-    if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex >= macro.actions.length) throw new Error('실행할 단계가 없습니다.');
+    if (macro.workflow) require('./workflow').runnable(macro.workflow);
+    if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex >= Math.max(1, macro.actions.length)) throw new Error('실행할 단계가 없습니다.');
     const control = new RunControl();
     if (this.onClickPoint) control.onClickPoint = this.onClickPoint;
     const active = { control, done: null, macro }; this.active = active;
-    this.publish({ status: 'RUNNING', runId: randomUUID(), macroId: macro.id, step: null, preview, error: null, outcome: null, matched: null, iteration: 0, iterations: macro.loop.count });
+    this.publish({ status: 'RUNNING', runId: randomUUID(), macroId: macro.id, step: null, preview, error: null, outcome: null, matched: null, nodeId: null, trace: [], iteration: 0, iterations: macro.loop.count });
     active.done = Promise.resolve().then(async () => {
       let outcome = 'completed'; let failure = null;
       try {
         if (!preview) await this.authorize(macro);
         for (let iteration = 0; iteration < macro.loop.count; iteration++) {
           this.publish({ iteration: iteration + 1, iterations: macro.loop.count });
-          await this.execute(macro.actions.slice(startIndex), control, macro, preview, [], startIndex);
+          if (macro.workflow) await this.executeGraph(macro, control, preview);
+          else await this.execute(macro.actions.slice(startIndex), control, macro, preview, [], startIndex);
           if (iteration + 1 < macro.loop.count) await control.wait(macro.loop.interval_ms);
         }
       } catch (error) { if (error instanceof Cancelled) outcome = 'cancelled'; else { outcome = 'failed'; failure = error.message; } }
@@ -60,6 +62,25 @@ class MacroRunner {
       return this.state();
     });
     return this.state();
+  }
+  async executeGraph(macro, control, preview) {
+    let node = macro.workflow.nodes.find(n => n.kind === 'start');
+    const trace = [];
+    while (node) {
+      await control.checkpoint();
+      if (!preview) await this.authorize(macro);
+      trace.push({ nodeId: node.id, name: node.name, time: Math.round(control.time()) });
+      this.publish({ nodeId: node.id, trace: trace.slice(-200) });
+      if (node.kind === 'end') return;
+      let port = 'next';
+      if (node.kind === 'condition') {
+        const matched = preview ? false : Boolean(await this.findImage(node.action, control));
+        port = matched ? 'true' : 'false';
+        this.publish({ matched, branch: port });
+      } else if (node.action) await this.execute([node.action], control, macro, preview, [node.id]);
+      const edge = macro.workflow.edges.find(e => e.source === node.id && e.port === port);
+      node = macro.workflow.nodes.find(n => n.id === edge?.target);
+    }
   }
   async execute(items, control, macro, preview, prefix, offset = 0) {
     for (let index = 0; index < items.length; index++) {
@@ -183,7 +204,7 @@ class MacroRunner {
     await this.authorize(macro); await control.checkpoint();
     if (!this.input) throw new Error('창 입력 어댑터가 준비되지 않았습니다.');
     const start = control.time(); let settled = false; let timedOut = false;
-    const operation = Promise.resolve().then(() => this.input.execute(action, macro.target_window, control)).finally(() => { settled = true; });
+    const operation = Promise.resolve().then(() => this.input.execute(macro.reference ? { ...action, reference: macro.reference } : action, macro.target_window, control)).finally(() => { settled = true; });
     operation.catch(() => {});
     while (!settled) {
       if (control.time() - start >= action.timeout_ms) { timedOut = true; control.stop(); }

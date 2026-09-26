@@ -44,3 +44,18 @@ test('move-only actions never report a click point', async () => {
   await input.execute({ type: 'mouse_move', x: 5, y: 6 }, {}, control);
   assert.equal(called, 0);
 });
+test('reference clicks use client size once and await asynchronous foreground guards', async () => {
+  const events=[];
+  const input=createInputAdapter({
+    windowAdapter:{prepareWindow:async()=>({window:{handle:1},region:{x:100,y:200,width:1280,height:960,dpi:192}})},
+    keyboard:{releaseAll:async()=>{}},
+    nativeAdapter:{isPointInWindow:async()=>true,isForeground:async()=>true,moveCursor:async p=>events.push(p),clickMouse:async b=>events.push(b)},
+  });
+  await input.execute({type:'click',x:400,y:300,reference:{width:800,height:600}}, {}, new RunControl());
+  assert.deepEqual(events,[{x:740,y:680},'left']);
+});
+test('an async native foreground rejection prevents clicking', async () => {
+  const {events,input,nativeAdapter}=fixture();nativeAdapter.isForeground=async()=>false;
+  await assert.rejects(input.execute({type:'click',x:30,y:40},{},new RunControl()),/対象|대상/);
+  assert.equal(events.some(([type])=>type==='click'),false);
+});

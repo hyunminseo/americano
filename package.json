@@ -1,7 +1,7 @@
 {
   "name": "americano",
   "version": "1.0.0",
-  "description": "Windows screen automation manager",
+  "description": "Cross-platform visual workflow automation",
   "main": "electron/main.js",
   "private": true,
   "engines": {
@@ -13,17 +13,20 @@
     "start": "electron .",
     "dev": "electron .",
     "build:icon": "node scripts/build-icon.cjs",
-    "build": "npm run build:icon && electron-builder --win portable --x64",
+    "build": "electron-builder",
     "build:license-compare": "npm run build:icon && node scripts/build-license-comparison.cjs",
     "license:init": "node scripts/license-issuer.cjs init",
     "test:overlay-ui": "electron scripts/overlay-ui-smoke.cjs",
     "test:keyboard-ui": "electron scripts/keyboard-ui-smoke.cjs",
     "test:image-scenario": "electron scripts/image-scenario-smoke.cjs",
-    "test:image-mabinogi": "electron scripts/image-scenario-mabinogi.cjs"
+    "test:image-mabinogi": "electron scripts/image-scenario-mabinogi.cjs",
+    "build:win": "npm run build:icon && electron-builder --win portable --x64",
+    "build:mac": "electron-builder --mac dmg --arm64 --x64"
   },
   "devDependencies": {
     "electron": "^38.0.0",
-    "electron-builder": "^26.0.0"
+    "electron-builder": "^26.0.0",
+    "jsdom": "^29.1.1"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6",
@@ -37,20 +40,7 @@
     "asar": true,
     "files": [
       "electron/**/*",
-      "src/macros.js",
-      "src/portable.js",
-      "src/keyboard.js",
-      "src/store.js",
-      "src/runner.js",
-      "src/license.js",
-      "src/capture.js",
-      "src/matcher.js",
-      "src/detect.js",
-      "src/windows.js",
-      "src/input-adapter.js",
-      "src/uo-script/**/*",
-      "src/overlay.js",
-      "src/native-windows.js"
+      "src/**/*"
     ],
     "asarUnpack": [
       "node_modules/screenshot-desktop/lib/win32/**/*",
@@ -70,6 +60,14 @@
     },
     "portable": {
       "artifactName": "Americano-Portable.exe"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "워크플로우에서 대상 화면의 이미지를 인식합니다.",
+        "NSAppleEventsUsageDescription": "사용자가 선택한 대상 창을 제어합니다."
+      }
     }
   }
 }

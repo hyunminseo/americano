@@ -10,7 +10,7 @@ class MacroStore {
     this.queue = Promise.resolve(); this.ready = false;
   }
   async open() {
-    if (!this.protector.isEncryptionAvailable()) throw new Error('Windows 보호 저장소를 사용할 수 없습니다.');
+    if (!this.protector.isEncryptionAvailable()) throw new Error('운영체제 보호 저장소를 사용할 수 없습니다.');
     await fs.mkdir(this.directory, { recursive: true });
     let wrapped;
     try { wrapped = await fs.readFile(this.keyFile); }

@@ -113,3 +113,18 @@ test('legacy client coordinates remain unchanged in schema and execution', async
   runner.start(macro); await runner.active.done;
   assert.equal(inputs[0].x, 50); assert.equal(inputs[0].y, 60);
 });
+
+test('workflow graph image references remain synchronized through portable export and decode', async () => {
+  const { fromActions } = require('../src/workflow');
+  const source = path.join(__dirname, 'test_images/target1.png');
+  const raw = require('../src/macros').newMacro();
+  raw.reference = {width:800,height:600};
+  raw.overlay = {x:0,y:0,width:800,height:600};
+  raw.workflow = fromActions([{type:'image_click',image:source,region:raw.overlay}]);
+  raw.images = [{id:'im',name:'target',path:source,region:{x:0,y:0,width:30,height:30},reference_width:800}];
+  const bytes=await exportMacro(raw, {});
+  const decoded=await decodePackage(bytes);
+  assert.equal(decoded.macro.workflow.nodes[1].action.image,'asset-1');
+  assert.equal(decoded.macro.actions[0],decoded.macro.workflow.nodes[1].action);
+  assert.equal(decoded.macro.images[0].reference_width,800);
+});

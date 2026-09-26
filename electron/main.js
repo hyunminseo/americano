@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, safeStorage, dialog, screen } = require('electron');
+const { app, systemPreferences, BrowserWindow, globalShortcut, ipcMain, safeStorage, dialog, screen } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -6,11 +6,21 @@ const { MacroStore } = require('../src/store');
 const { MacroRunner } = require('../src/runner');
 const { exportMacro, importMacro, readPackage, rebindOverlay } = require('../src/portable');
 const { LicenseManager, readDeviceMacs, readLimited } = require('../src/license');
-const { findZoned } = require('../src/detect');
 const { createInputAdapter } = require('../src/input-adapter');
 const { listWindows, findWindow } = require('../src/windows');
 const { captureTarget, physicalRegion } = require('../src/overlay');
 const sharp = require('sharp');
+const runtimeDirectory = process.env.AMERICANO_USER_DATA || (!app.isPackaged ? path.join(app.getAppPath(), '.runtime') : null);
+if (runtimeDirectory) {
+  const directory = path.resolve(runtimeDirectory);
+  fs.mkdirSync(directory, { recursive: true });
+  app.setPath('userData', directory);
+  app.setPath('sessionData', directory);
+  app.setAppLogsPath(path.join(directory, 'logs'));
+  const crashDirectory = path.join(directory, 'crashes');
+  fs.mkdirSync(crashDirectory, { recursive: true });
+  app.setPath('crashDumps', crashDirectory);
+}
 const variant = require('../package.json').americanoVariant || 'standard';
 if (['mac-match', 'mac-mismatch'].includes(variant)) app.setPath('userData', path.join(app.getPath('appData'), `Americano-${variant}`));
 let mainWindow, store, runner, license, licenseTimer;
@@ -70,7 +80,8 @@ async function saveMatchShot(framePng, match, label) {
     if (pending || window.isDestroyed()) return; pending = true;
     try {
       const target = await findWindow(macro.target_window, 0);
-      const region = physicalRegion(require('../src/native-windows').geometry(target.handle), macro.overlay);
+      const client = require('../src/windows').contentRegion(await require('../src/platform').geometry(target.handle), macro.target_window);
+      const region = macro.reference ? require('../src/resolution').transform(client, macro.reference).region(macro.overlay) : physicalRegion(client, macro.overlay);
       if (window.isDestroyed()) return;
       const bounds = screen.screenToDipRect(null, region);
       window.setBounds({ x: bounds.x - 2, y: bounds.y - 2, width: bounds.width + 4, height: bounds.height + 4 });
@@ -94,7 +105,7 @@ let f7Ready = false;
 let quitting = false;
 let shutdownPromise = null;
 const shutdownDeadlineMs = 5000;
-const page = pathToFileURL(path.join(__dirname, 'index.html')).href;
+const page = pathToFileURL(path.join(__dirname, 'workflow.html')).href;
 function state() {
   return { document: store?.ready ? store.snapshot() : { version: 2, macros: [] }, run: runner.state(), error: startupError,
     storageReady: Boolean(store?.ready), shortcutsReady, f7Ready, executionAvailable: shortcutsReady,
@@ -103,7 +114,7 @@ function state() {
 }
 function notify() { if (mainWindow && !mainWindow.isDestroyed()) { const current = state(); mainWindow.webContents.send('backend-state', current); pushProgress(current); } }
 function createWindow() {
-  mainWindow = new BrowserWindow({ width: 1180, height: 850, minWidth: 900, minHeight: 650, backgroundColor: '#f5f1ea',
+  mainWindow = new BrowserWindow({ width: 1480, height: 940, minWidth: 900, minHeight: 650, backgroundColor: '#f7f8fa',
     icon: path.join(__dirname, 'assets', 'coffee.ico'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -119,10 +130,10 @@ async function openCaptureOverlay(payload) {
   const mode = payload.mode === 'image' ? 'image' : 'region';
   const macro = require('../src/macros').validateDocument({version: 2, macros: [payload.macro]}).macros[0];
   if (mode === 'image' && !macro.overlay) throw new Error('오버레이 영역을 먼저 설정하세요.');
-  const frame = await captureTarget(macro.target_window, mode === 'image' ? macro.overlay : null);
-  captureBuffer = frame.buffer;
+  const frame = await captureTarget(macro.target_window, mode === 'image' ? macro.overlay : null, null, macro.reference);
+  captureBuffer = macro.reference ? await sharp(frame.buffer).resize(mode === 'image' ? macro.overlay.width : macro.reference.width, mode === 'image' ? macro.overlay.height : macro.reference.height).png().toBuffer() : frame.buffer;
   const metadata = await sharp(captureBuffer).metadata();
-  captureMeta = { width: metadata.width, height: metadata.height, dpi: frame.dpi, mode, macroId: macro.id, offset: mode === 'image' ? macro.overlay : { x: 0, y: 0 } };
+  captureMeta = { width: metadata.width, height: metadata.height, dpi: macro.reference ? 96 : frame.dpi, mode, macroId: macro.id, offset: mode === 'image' ? macro.overlay : { x: 0, y: 0 } };
   const bounds = screen.screenToDipRect(null, frame.region);
   captureOverlay = new BrowserWindow({ ...bounds, frame: false, transparent: true, resizable: false, movable: false, skipTaskbar: true, alwaysOnTop: true,
     webPreferences: { preload: path.join(__dirname, 'overlay-preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -156,16 +167,15 @@ else {
     const imageMatcher = async (action, control, macro) => {
       const source = action.image.endsWith('.aimg') ? await store.readImage(action.image) : action.image;
       const area = macro.overlay || action.region;
-      const shot = await captureTarget(macro.target_window, area, control);
-      const frame = await sharp(shot.buffer).resize({ width: area.width, height: area.height }).png().toBuffer();
-      const home = action.image.endsWith('.aimg')
-        ? macro.images?.find((asset) => asset.path === action.image)?.region ?? null
-        : null;
-      const match = await findZoned(frame, source, area, action.zone ?? 0, action.threshold, control, home);
+      const shot = await captureTarget(macro.target_window, area, control, macro.reference);
+      const { match, frame } = await require('../src/vision').matchFrame({ buffer: shot.buffer, source, area, reference: macro.reference, asset: macro.images?.find(im => im.path === action.image), zone: action.zone, threshold: action.threshold, control });
       if (match) void saveMatchShot(frame, match, action.type);
       return match;
     };
-    runner = new MacroRunner({ input: createInputAdapter(), imageMatcher, authorize: () => license.authorize(), onState: () => notify(), onClickPoint: (point) => flashClick(point) });
+    runner = new MacroRunner({ input: createInputAdapter(), imageMatcher, authorize: () => {
+      license.authorize();
+      if (process.platform === 'darwin' && (!systemPreferences.isTrustedAccessibilityClient(false) || systemPreferences.getMediaAccessStatus('screen') !== 'granted')) throw new Error('시스템 설정 → 개인정보 보호 및 보안에서 Americano의 손쉬운 사용 및 화면 기록 권한을 허용하세요.');
+    }, onState: () => notify(), onClickPoint: (point) => flashClick(point) });
     let lastLicense = JSON.stringify(license.state());
     let identityTicks = 0;
     licenseTimer = setInterval(() => {
@@ -222,10 +232,10 @@ else {
           case 'overlay-auto': {
             const macro = require('../src/macros').validateDocument({ version: 2, macros: [payload.macro] }).macros[0];
             const target = await findWindow(macro.target_window, 10000);
-            const client = require('../src/native-windows').geometry(target.handle);
+            const client = (await require('../src/windows').prepareWindow(macro.target_window)).region;
             if (client.width < 8 || client.height < 8) throw new Error('대상 창의 영역을 읽지 못했습니다. 최소화를 해제하고 다시 시도하세요.');
             const { fullClientOverlay } = require('../src/overlay');
-            return { ok: true, macro: rebindOverlay(macro, fullClientOverlay(client)), state: state() };
+            return { ok: true, macro: rebindOverlay(macro, macro.reference ? {x:0,y:0,...macro.reference} : fullClientOverlay(client)), state: state() };
           }
           case 'license-device': await refreshIdentity(); return { ok: true, macs: currentMacs, state: state() };
           case 'license-check': await refreshIdentity(); license.authorize(); break;

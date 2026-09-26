@@ -1,5 +1,5 @@
 class WindowAdapterError extends Error {}
-const native = () => require('./native-windows');
+const native = () => require('./platform');
 function matchesTarget(info, target) {
   const fields = ['process_name', 'executable_path', 'title_contains'];
   if (!fields.some((field) => target[field])) return false;
@@ -22,13 +22,22 @@ async function findWindow(target, timeoutMs = 10000, control = null) {
 async function prepareWindow(target, control) {
   const window = await findWindow(target, 10000, control);
   if (control) await control.checkpoint();
-  native().activate(window.handle);
-  for (let attempt = 0; attempt < 20 && !native().isForeground(window.handle); attempt++) {
+  await native().activate(window.handle);
+  for (let attempt = 0; attempt < 20 && !(await native().isForeground(window.handle)); attempt++) {
     if (control) await control.wait(25); else await new Promise((resolve) => setTimeout(resolve, 25));
   }
   if (!native().isForeground(window.handle)) throw new WindowAdapterError('대상 창 전경 전환에 실패했습니다.');
-  const region = native().geometry(window.handle);
+  let region = await native().geometry(window.handle);
+  region = contentRegion(region, target);
   return { window, region, dpi: region.dpi };
+}
+function contentRegion(region, target) {
+  if (target.viewport) {
+    const v = target.viewport;
+    if (![v.x,v.y,v.width,v.height].every(Number.isFinite) || v.x < 0 || v.y < 0 || v.width <= 0 || v.height <= 0 || v.x + v.width > region.width || v.y + v.height > region.height) throw new WindowAdapterError('콘텐츠 영역이 대상 창을 벗어났습니다.');
+    region = { ...region, x: region.x + v.x, y: region.y + v.y, width: v.width, height: v.height };
+  }
+  return region;
 }
 function screenPoint(region, x, y) {
   const scale = (region.dpi || 96) / 96;
@@ -36,4 +45,4 @@ function screenPoint(region, x, y) {
   if (point.x < region.x || point.y < region.y || point.x >= region.x + region.width || point.y >= region.y + region.height) throw new WindowAdapterError('창 상대 좌표가 대상 창 영역을 벗어났습니다.');
   return point;
 }
-module.exports = { WindowAdapterError, listWindows, matchesTarget, findWindow, prepareWindow, screenPoint };
+module.exports = { contentRegion, WindowAdapterError, listWindows, matchesTarget, findWindow, prepareWindow, screenPoint };
